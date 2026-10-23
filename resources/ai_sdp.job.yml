@@ -1,0 +1,21 @@
+# Lakeflow Job that runs the ai_sdp_rag pipeline whenever new source documents
+# land in the raw volume. File-arrival triggers are a Jobs feature (not available
+# on a standalone pipeline), so the pipeline is wrapped in a single-task job here.
+resources:
+  jobs:
+    ai_sdp_ingest:
+      name: ai_sdp_ingest
+      # Fire when new files appear under the raw documents folder. The trigger
+      # polls the location (~every minute) and starts a run on newly-arrived
+      # files; files already present when the trigger is created form the
+      # baseline and do not fire it.
+      trigger:
+        # `mode: development` pauses triggers by default; force it on so the
+        # file-arrival demo works on the dev target too.
+        pause_status: UNPAUSED
+        file_arrival:
+          url: /Volumes/${var.catalog}/${var.schema}/${var.raw_volume}/documents/
+      tasks:
+        - task_key: run_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.ai_sdp_rag.id}

@@ -1,0 +1,17 @@
+# Example Terraform variables. Copy to terraform.tfvars and fill in your values.
+# DO NOT commit terraform.tfvars — it is gitignored.
+
+# Databricks workspace host (only needed if not set via environment variable DATABRICKS_HOST)
+# databricks_host = "https://<your-workspace>.cloud.databricks.com"
+
+# Unity Catalog name
+catalog_name = "ai_sdp_catalog"
+
+# Schema name
+schema_name = "rag"
+
+# Raw documents volume name
+raw_volume_name = "raw_docs"
+
+# Environment (dev or prod)
+environment = "dev"

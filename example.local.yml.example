@@ -1,0 +1,14 @@
+# Per-workspace bundle target, kept out of git.
+#
+# Copy to e.g. myworkspace.local.yml (any *.local.yml file is picked up by the
+# `include` in databricks.yml and ignored by git), adjust, then:
+#   databricks bundle deploy -t myworkspace --profile <your-profile>
+targets:
+  myworkspace:
+    mode: development
+    workspace:
+      host: https://<your-workspace>.cloud.databricks.com
+    variables:
+      # e.g. when you can't create the default ai_sdp_catalog
+      catalog: <your_catalog>
+      schema: ai_sdp_rag

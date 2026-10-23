@@ -1,0 +1,43 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info
+.ruff_cache/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+tfplan
+terraform.tfvars
+
+# Databricks bundle state
+.databricks/
+
+# OS
+.DS_Store
+
+# Build outputs
+data_generation/generated_docs/
+*.parquet
+data_generation/**/*.json
+dist/
+build/
+*.zip
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+*.b64
+
+
+# Per-workspace bundle targets (see example.local.yml.example)
+*.local.yml

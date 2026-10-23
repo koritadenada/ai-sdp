@@ -1,0 +1,4 @@
+# Pin a recent Streamlit: the Apps base image ships an older build without
+# st.button(icon=...) / st.popover(icon=...). databricks-sdk is used for retrieval.
+streamlit>=1.40
+databricks-sdk>=0.125.0

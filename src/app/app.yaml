@@ -1,0 +1,17 @@
+command:
+  - "streamlit"
+  - "run"
+  - "app.py"
+
+env:
+  # The app's own service principal queries the index and the model endpoints
+  # in the same workspace. Set RAG_INDEX to <catalog>.<schema>.gold_rag_chunks_index
+  # of the bundle target you deployed (default: the dev target).
+  - name: RAG_UI_ONLY
+    value: "false"
+  - name: RAG_INDEX
+    value: "ai_sdp_catalog.rag_dev.gold_rag_chunks_index"
+  - name: RAG_EMBED_ENDPOINT
+    value: "databricks-gte-large-en"
+  - name: RAG_LLM_ENDPOINT
+    value: "databricks-claude-sonnet-4-5"

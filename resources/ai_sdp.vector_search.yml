@@ -1,0 +1,36 @@
+# AI Search (formerly Vector Search) endpoint + DELTA_SYNC index sourced
+# directly from the gold materialized view.
+#
+# Embeddings are self-managed: gold_rag_chunks stores the precomputed 1024-dim
+# `embedding` (gte-large-en), so the index syncs that vector column rather than
+# computing embeddings itself.
+#
+# Prerequisite: the "AI Search on materialized views" preview must be enabled on
+# the workspace (ask your Databricks account team). The MV's table properties
+# (src/pipelines/gold_rag_chunks.py) do the rest. Without the preview, set
+# source_table to the silver_chunks streaming table instead; it carries the same
+# columns and the rest of the pipeline is unchanged.
+resources:
+  vector_search_endpoints:
+    ai_sdp_vs:
+      name: ai-sdp-vs-${bundle.target}
+      endpoint_type: STANDARD
+
+  vector_search_indexes:
+    ai_sdp_rag_index:
+      name: ${var.catalog}.${var.schema}.gold_rag_chunks_index
+      endpoint_name: ai-sdp-vs-${bundle.target}
+      primary_key: chunk_id
+      index_type: DELTA_SYNC
+      delta_sync_index_spec:
+        # The MV itself is the source — the whole point of the preview.
+        source_table: ${var.catalog}.${var.schema}.gold_rag_chunks
+        pipeline_type: TRIGGERED
+        # Self-managed 1024-dim embedding computed in the pipeline (gte-large-en).
+        embedding_vector_columns:
+          - name: embedding
+            embedding_dimension: 1024
+        # columns_to_sync is omitted on purpose: the default syncs every gold
+        # column, which is exactly what retrieval + filtering need. Listing it
+        # explicitly made `bundle plan` recreate the index on every deploy (the
+        # API doesn't echo the field back, and it's immutable).

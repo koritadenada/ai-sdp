@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI in SDP — Architecture</title>
+<style>
+  :root {
+    --lava:#FF3621; --navy:#1B3139; --ink:#1B3139; --muted:#5A6B72;
+    --line:#E2E6EA; --line2:#CDD5DB; --card:#FFFFFF; --wash:#F5F7F9;
+    --bronze:#B06A3B; --silver:#8A97A5; --gold:#E1A93E; --uc:#2272B4;
+    --pdf:#E5484D; --docx:#2272B4; --png:#00A06B;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:#FFFFFF; color:var(--ink);
+    font:13px/1.45 "DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  .page { padding:30px 32px; display:inline-block; min-width:100%; }
+
+  .head { display:flex; align-items:center; gap:11px; margin-bottom:5px; }
+  .head h1 { font-size:19px; margin:0; color:var(--navy); font-weight:700; letter-spacing:-.01em; }
+  .sub { color:var(--muted); margin:0 0 24px; font-size:13px; max-width:960px; }
+  .sub b { color:var(--navy); } .lava { color:var(--lava); }
+
+  .row { display:flex; align-items:center; gap:6px; }
+
+  /* file-type sources + converging fan into Auto Loader */
+  .sources { display:flex; flex-direction:column; justify-content:space-between; height:116px; }
+  .fchip { display:flex; align-items:center; gap:7px; }
+  .fchip span { font-weight:700; font-size:11.5px; color:var(--navy); }
+  .fan { display:flex; flex-direction:column; align-items:center; }
+  .fan .op { font-size:11px; color:var(--muted); margin-bottom:3px; }
+
+  .arrow { min-width:80px; display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .arrow .op { font-size:11px; color:var(--muted); text-align:center; line-height:1.25; }
+  .arrow .op code { background:var(--wash); border:1px solid var(--line); padding:0 4px; border-radius:3px; color:var(--navy); font-size:10.5px; }
+  .arrow .track { position:relative; width:100%; height:2px; background:var(--line2); border-radius:2px; }
+  .arrow .track::after { content:""; position:absolute; right:-2px; top:-4px;
+    border-left:9px solid var(--lava); border-top:5px solid transparent; border-bottom:5px solid transparent; }
+
+  .node { background:var(--card); border:1px solid var(--line); border-top:4px solid var(--silver);
+    border-radius:11px; padding:12px 14px; width:154px; min-height:72px;
+    display:flex; flex-direction:column; justify-content:center; box-shadow:0 1px 3px rgba(27,49,57,.08); }
+  .node .name { font-weight:700; font-size:13.5px; color:var(--navy); display:flex; align-items:center; gap:7px; }
+  .node .name svg { flex:0 0 auto; }
+  .node .desc { color:var(--muted); font-size:11px; margin-top:4px; }
+  .n-index { border-top-color:var(--lava); }
+
+  /* uniform pipeline tiles (bronze = silver = gold) */
+  .tile { width:138px; min-height:78px; box-shadow:none; background:var(--card); }
+  .tile.gold { border-top-color:var(--gold); }
+
+  /* Lakeflow SDP product container */
+  .product { border:1px solid var(--line); border-radius:14px; background:var(--card);
+    box-shadow:0 3px 12px rgba(27,49,57,.09); overflow:hidden; }
+  .product > .bar { background:var(--navy); color:#fff; font-weight:700; font-size:11.5px;
+    letter-spacing:.06em; text-transform:uppercase; padding:8px 15px; display:flex; align-items:center; gap:9px; }
+  .product > .bar .tick { width:9px; height:9px; border-radius:2px; background:var(--lava); }
+  .product > .body { display:flex; align-items:center; gap:8px; padding:16px 15px; }
+
+  .group { border:1.5px dashed var(--line2); border-radius:12px; padding:22px 12px 12px; position:relative;
+    display:flex; align-items:center; gap:8px; background:var(--wash); }
+  .group .glabel { position:absolute; top:-9px; left:13px; background:var(--card); padding:0 8px;
+    font-size:10.5px; font-weight:700; letter-spacing:.04em; color:var(--silver); text-transform:uppercase; }
+  .miniarrow { position:relative; width:22px; height:2px; background:var(--line2); border-radius:2px; flex:0 0 auto; }
+  .miniarrow::after { content:""; position:absolute; right:-1px; top:-4px;
+    border-left:7px solid var(--line2); border-top:4px solid transparent; border-bottom:4px solid transparent; }
+
+  .uc { margin-top:16px; border:1px solid var(--line); border-left:5px solid var(--uc);
+    background:var(--card); border-radius:11px; padding:11px 15px; display:flex; align-items:center; gap:10px;
+    box-shadow:0 1px 3px rgba(27,49,57,.06); }
+  .uc .t { font-weight:700; color:var(--navy); font-size:13px; }
+  .uc .d { color:var(--muted); font-size:12px; }
+
+  .legend { display:flex; gap:16px; margin-top:18px; font-size:12px; color:var(--muted); flex-wrap:wrap; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .dot { width:11px; height:11px; border-radius:3px; }
+  .foot { margin-top:9px; font-size:12px; color:var(--muted); }
+  .foot b { color:var(--navy); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <svg width="30" height="33" viewBox="0 0 300 331" xmlns="http://www.w3.org/2000/svg"><path d="M283.923 136.449L150.144 213.624L6.88995 131.168L0 134.982V194.844L150.144 281.115L283.923 204.234V235.926L150.144 313.1L6.88995 230.644L0 234.458V244.729L150.144 331L300 244.729V184.867L293.11 181.052L150.144 263.215L16.0766 186.334V154.643L150.144 231.524L300 145.253V86.2713L292.536 81.8697L150.144 163.739L22.9665 90.9663L150.144 17.8998L254.641 78.055L263.828 72.773V65.4371L150.144 0L0 86.2713V95.6613L150.144 181.933L283.923 104.758V136.449Z" fill="#FF3621"/></svg>
+    <h1>Document RAG, end to end in one Lakeflow pipeline</h1>
+  </div>
+  <p class="sub">AI calls live in <b>streaming tables</b> (embed-once); the
+    <b class="lava">gold materialized view</b> never calls a model, and AI Search syncs straight from it.</p>
+
+  <div class="row">
+    <!-- Sources: PDF / DOCX / PNG -->
+    <div class="sources">
+      <div class="fchip">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M7 2h7l4 4v16H7z" stroke="var(--pdf)" stroke-width="1.5" fill="rgba(229,72,77,.08)"/><path d="M14 2v4h4" stroke="var(--pdf)" stroke-width="1.5"/></svg>
+        <span>PDF</span>
+      </div>
+      <div class="fchip">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M7 2h7l4 4v16H7z" stroke="var(--docx)" stroke-width="1.5" fill="rgba(34,114,180,.08)"/><path d="M14 2v4h4" stroke="var(--docx)" stroke-width="1.5"/></svg>
+        <span>DOCX</span>
+      </div>
+      <div class="fchip">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="2" stroke="var(--png)" stroke-width="1.5" fill="rgba(0,160,107,.08)"/><circle cx="9" cy="9" r="1.6" fill="var(--png)"/><path d="M5 17l4-4 3 3 3-4 4 5" stroke="var(--png)" stroke-width="1.5" fill="none"/></svg>
+        <span>PNG</span>
+      </div>
+    </div>
+
+    <!-- converging fan → Auto Loader -->
+    <div class="fan">
+      <div class="op">Auto Loader</div>
+      <svg width="94" height="116" viewBox="0 0 94 116" fill="none">
+        <g stroke="#CDD5DB" stroke-width="2">
+          <path d="M2 15 C 34 15, 30 58, 54 58"/>
+          <path d="M2 58 H 54"/>
+          <path d="M2 101 C 34 101, 30 58, 54 58"/>
+        </g>
+        <path d="M54 58 H 84" stroke="#FF3621" stroke-width="2"/>
+        <path d="M82 52 L 92 58 L 82 64 Z" fill="#FF3621"/>
+      </svg>
+    </div>
+
+    <!-- Lakeflow SDP -->
+    <div class="product">
+      <div class="bar"><span class="tick"></span>Lakeflow Spark Declarative Pipeline</div>
+      <div class="body">
+        <div class="group">
+          <div class="glabel">Streaming tables · AI runs here · embed-once</div>
+          <div class="node tile">
+            <div class="name">
+              <!-- streaming table icon (bronze) -->
+              <svg width="17" height="17" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M1.75 1C1.33579 1 1 1.33579 1 1.75V14.25C1 14.6642 1.33579 15 1.75 15H6.5V7H9.5V8H11V7H13.5V8H15V1.75C15 1.33579 14.6642 1 14.25 1H1.75ZM5 7V13.5H2.5V7H5ZM13.5 5.5V2.5H2.5V5.5H13.5Z" fill="#B06A3B"/><path d="M9.02387 10.9205C9.5085 10.3147 10.4345 10.3292 10.9 10.9498C11.9538 12.3549 14.0502 12.3876 15.1473 11.0161L15.5856 10.4683L14.4143 9.53128L13.976 10.0791C13.4914 10.6849 12.5654 10.6704 12.1 10.0498C11.0462 8.64474 8.94974 8.61199 7.85257 9.98345L7.41431 10.5313L8.58561 11.4683L9.02387 10.9205Z" fill="#B06A3B"/><path d="M9.02387 13.9205C9.5085 13.3147 10.4345 13.3292 10.9 13.9498C11.9538 15.3549 14.0502 15.3876 15.1473 14.0161L15.5856 13.4683L14.4143 12.5313L13.976 13.0791C13.4914 13.6849 12.5654 13.6704 12.1 13.0498C11.0462 11.6447 8.94974 11.612 7.85257 12.9834L7.41431 13.5313L8.58561 14.4683L9.02387 13.9205Z" fill="#B06A3B"/></svg>
+              bronze</div>
+            <div class="desc">ingest</div>
+          </div>
+          <div class="miniarrow"></div>
+          <div class="node tile">
+            <div class="name">
+              <!-- streaming table icon (silver) -->
+              <svg width="17" height="17" viewBox="0 0 16 16" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M1.75 1C1.33579 1 1 1.33579 1 1.75V14.25C1 14.6642 1.33579 15 1.75 15H6.5V7H9.5V8H11V7H13.5V8H15V1.75C15 1.33579 14.6642 1 14.25 1H1.75ZM5 7V13.5H2.5V7H5ZM13.5 5.5V2.5H2.5V5.5H13.5Z" fill="#8A97A5"/><path d="M9.02387 10.9205C9.5085 10.3147 10.4345 10.3292 10.9 10.9498C11.9538 12.3549 14.0502 12.3876 15.1473 11.0161L15.5856 10.4683L14.4143 9.53128L13.976 10.0791C13.4914 10.6849 12.5654 10.6704 12.1 10.0498C11.0462 8.64474 8.94974 8.61199 7.85257 9.98345L7.41431 10.5313L8.58561 11.4683L9.02387 10.9205Z" fill="#8A97A5"/><path d="M9.02387 13.9205C9.5085 13.3147 10.4345 13.3292 10.9 13.9498C11.9538 15.3549 14.0502 15.3876 15.1473 14.0161L15.5856 13.4683L14.4143 12.5313L13.976 13.0791C13.4914 13.6849 12.5654 13.6704 12.1 13.0498C11.0462 11.6447 8.94974 11.612 7.85257 12.9834L7.41431 13.5313L8.58561 14.4683L9.02387 13.9205Z" fill="#8A97A5"/></svg>
+              silver</div>
+            <div class="desc">parse · chunk · embed</div>
+          </div>
+        </div>
+        <div class="arrow"><div class="op"><code>no AI</code></div><div class="track"></div></div>
+        <div class="node tile gold">
+          <div class="name">
+            <!-- table view (materialized view) icon (gold) -->
+            <svg width="17" height="17" viewBox="0 0 16 16" fill="none"><g clip-path="url(#clip_mv)"><path fill-rule="evenodd" clip-rule="evenodd" d="M1.75 1C1.33579 1 1 1.33579 1 1.75V14.25C1 14.6642 1.33579 15 1.75 15H4V13.5H2.5V7H5V9H6.5V7H9.5V9H11V7H13.5V9H15V1.75C15 1.33579 14.6642 1 14.25 1H1.75ZM13.5 5.5V2.5H2.5V5.5H13.5Z" fill="#E1A93E"/><path fill-rule="evenodd" clip-rule="evenodd" d="M11.75 10C11.5511 10 11.3603 10.079 11.2197 10.2197C11.1398 10.2995 11.0798 10.3955 11.0429 10.5H9.95735C9.85439 10.2087 9.57658 10 9.25003 10L5.75 10C5.55108 10 5.36031 10.079 5.21966 10.2197C5.07901 10.3603 4.99999 10.5511 5 10.75L5.00003 12.5C5.00003 13.8807 6.11932 15 7.50003 15C8.88074 15 10 13.8807 10 12.5V12H11L11 12.5C11 13.8807 12.1193 15 13.5 15C14.8807 15 16 13.8807 16 12.5V10.7506C16 10.3364 15.6642 10 15.25 10L11.75 10ZM12.5 12.5L12.5 11.5L14.5 11.5V12.5C14.5 13.0523 14.0523 13.5 13.5 13.5C12.9477 13.5 12.5 13.0523 12.5 12.5ZM6.50002 11.5L6.50003 12.5C6.50003 13.0523 6.94774 13.5 7.50003 13.5C8.05231 13.5 8.50003 13.0523 8.50003 12.5V11.5001L6.50002 11.5Z" fill="#E1A93E"/></g><defs><clipPath id="clip_mv"><rect width="16" height="16" fill="white"/></clipPath></defs></svg>
+            gold</div>
+          <div class="desc">materialized view</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow"><div class="op">Delta Sync</div><div class="track"></div></div>
+
+    <div class="node n-index">
+      <div class="name">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="10.5" cy="10.5" r="6" stroke="#FF3621" stroke-width="1.7"/><path d="M19.5 19.5l-4-4" stroke="#FF3621" stroke-width="1.8" stroke-linecap="round"/><path d="M10.5 7l.85 2.15L13.5 10l-2.15.85L10.5 13l-.85-2.15L7.5 10l2.15-.85z" fill="#FF3621"/></svg>
+        AI Search</div>
+      <div class="desc">DELTA_SYNC index</div>
+    </div>
+  </div>
+
+  <div class="uc">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z" stroke="#2272B4" stroke-width="1.8" fill="rgba(34,114,180,.08)"/></svg>
+    <span class="t">Unity Catalog</span>
+    <span class="d">— every layer is a governed table: one permission model, lineage, and discovery.</span>
+  </div>
+
+  <div class="legend">
+    <span><i class="dot" style="background:var(--bronze)"></i>Bronze (streaming)</span>
+    <span><i class="dot" style="background:var(--silver)"></i>Silver (streaming)</span>
+    <span><i class="dot" style="background:var(--gold)"></i>Gold (materialized view)</span>
+    <span><i class="dot" style="background:var(--lava)"></i>AI Search index</span>
+    <span><i class="dot" style="background:var(--uc)"></i>Unity Catalog</span>
+  </div>
+  <p class="foot">Downstream, the gold table feeds <b>a RAG agent/app</b>, <b>Genie</b>,
+    <b>AI/BI dashboards</b>, and <b>Model Serving</b>.</p>
+</div>
+</body>
+</html>

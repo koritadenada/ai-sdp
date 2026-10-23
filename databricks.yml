@@ -1,0 +1,48 @@
+# Databricks Asset Bundle for the ai-sdp RAG data-processing pipeline.
+# Docs: https://docs.databricks.com/dev-tools/bundles/
+bundle:
+  name: ai-sdp
+  # Direct deployment engine is required for Vector Search resources.
+  # https://docs.databricks.com/dev-tools/bundles/direct
+  engine: direct
+
+include:
+  - resources/*.yml
+  # Optional, gitignored per-workspace targets (see example.local.yml.example).
+  - "*.local.yml"
+
+# Catalog/schema are parameterized so the same code deploys to dev and prod.
+variables:
+  catalog:
+    description: Unity Catalog catalog the pipeline writes to.
+    default: ai_sdp_catalog
+  schema:
+    description: Schema (within the catalog) for bronze/silver/gold tables.
+    default: rag
+  raw_volume:
+    description: UC volume that holds the raw source documents.
+    default: raw_docs
+
+targets:
+  # The workspace comes from your CLI profile: pass --profile <name> (or set
+  # DATABRICKS_CONFIG_PROFILE). No host is pinned here, so the bundle deploys to
+  # any workspace without edits.
+  #
+  # Default target. `mode: development` prefixes resources with [dev <user>]
+  # and pauses schedules, so it is safe to iterate against a shared workspace.
+  dev:
+    mode: development
+    default: true
+    variables:
+      schema: rag_dev
+
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      schema: rag
+
+  # Need different catalog/schema for your workspace (e.g. no CREATE CATALOG)?
+  # Either pass --var catalog=... --var schema=..., or copy
+  # example.local.yml.example to <name>.local.yml and add a target there.

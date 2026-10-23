@@ -1,0 +1,21 @@
+# Serverless Lakeflow Spark Declarative Pipeline (SDP) definition.
+resources:
+  pipelines:
+    ai_sdp_rag:
+      name: ai_sdp_rag
+      catalog: ${var.catalog}
+      schema: ${var.schema}
+      serverless: true
+      # PREVIEW channel → latest serverless runtime, required for
+      # ai_parse_document (DBR 17.3+) and ai_prep_search (DBR 18.2+ / env v3).
+      channel: PREVIEW
+      root_path: "../"
+      # Pass config through to the pipeline code (read via spark.conf.get).
+      # NOTE: external metadata / readable CDF for the Vector Search index is
+      # enabled per-table on the gold_rag_chunks MV (see its table_properties
+      # in src/pipelines/gold_rag_chunks.py), not pipeline-wide.
+      configuration:
+        raw_docs_path: /Volumes/${var.catalog}/${var.schema}/${var.raw_volume}/documents/
+      libraries:
+        - glob:
+            include: ../src/pipelines/**

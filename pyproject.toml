@@ -1,0 +1,30 @@
+[project]
+name = "ai-sdp"
+version = "0.1.0"
+description = "Lakeflow SDP pipeline: raw -> bronze -> silver -> gold for RAG data processing."
+requires-python = ">=3.11"
+# Runtime deps installed on serverless compute for the pipeline.
+# (Empty: the transformations use only built-in Spark + pyspark.pipelines.)
+dependencies = []
+
+[project.optional-dependencies]
+# Local dev tooling only — not needed at pipeline runtime.
+dev = [
+  "databricks-sdk>=0.122",
+  "ruff>=0.15",
+]
+# Sample-document generation (data_generation/generate_documents.py, run by seed.sh).
+docgen = [
+  "python-docx>=1.1",
+  "fpdf2>=2.7",
+  "Pillow>=10.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
+# `spark` is a global injected into pipeline modules at runtime by SDP.
+builtins = ["spark"]

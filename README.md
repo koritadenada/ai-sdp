@@ -6,7 +6,7 @@ inline as an AI function. A Streamlit **Databricks App** ("AI in SDP Agent")
 answers questions over the index.
 
 Built with the `pyspark.pipelines` API on **serverless** compute and deployed
-with a Databricks Asset Bundle.
+with a Declarative Automation Bundle (formerly Databricks Asset Bundles).
 
 ![Architecture](docs/ai_sdp_architecture.png)
 
@@ -26,24 +26,22 @@ raw document files (PDF/DOCX/PNG) in a UC volume
 │ silver_parsed    │  ai_parse_document → text, ONCE per file
 │  (streaming tbl) │  error_status · char_count · is_valid (failures kept, flagged)
 └──────────────────┘
-        │  WHERE is_valid (filtered BEFORE any enrichment call)
-        ▼
-┌──────────────────┐
-│ silver_documents │  ai_analyze_sentiment(body) → sentiment
-│  (streaming tbl) │  ai_classify(body, [...])   → topic
-└──────────────────┘
-        │
-        ▼
-┌──────────────────┐
-│ silver_chunks    │  ai_prep_search → semantic chunks (chunk_to_embed / chunk_to_retrieve)
-│  (streaming tbl) │  ai_query(databricks-gte-large-en) → 1024-dim embedding, ONCE per chunk
-└──────────────────┘
-        │
-        ▼
-┌──────────────────┐
-│ gold_rag_chunks  │  projection + filter over silver_chunks; no AI functions
-│  (mat. view)     │
-└──────────────────┘
+        │  WHERE is_valid (filtered BEFORE any AI call), feeds both tables below
+        ├───────────────────────────────┐
+        ▼                               ▼
+┌──────────────────┐          ┌──────────────────┐
+│ silver_documents │          │ silver_chunks    │
+│  (streaming tbl) │          │  (streaming tbl) │
+└──────────────────┘          └──────────────────┘
+  ai_analyze_sentiment → sentiment   ai_prep_search → semantic chunks
+  ai_classify (v2.1)   → topic       ai_query(gte-large-en) → 1024-dim embedding
+        │                               │  ONCE per chunk
+        └───────────────┬───────────────┘
+                        ▼  join on doc_id
+              ┌──────────────────┐
+              │ gold_rag_chunks  │  chunks + topic/sentiment, valid chunks only;
+              │  (mat. view)     │  no AI functions
+              └──────────────────┘
         │  Delta Sync, self-managed embeddings
         ▼
 ┌────────────────────────┐
@@ -55,16 +53,19 @@ raw document files (PDF/DOCX/PNG) in a UC volume
 ```
 
 **The one rule:** AI function calls live only in streaming tables, which
-process each row exactly once, so every document is parsed and embedded once,
-on arrival. Gold is a materialized view with no AI functions: refreshing it
-never re-invokes a model, and SDP can refresh it incrementally. Calling a
-non-deterministic function such as `ai_query` inside the MV would force a full
-recompute, and a re-embed of every chunk, on every refresh.
+process each row once (until you full-refresh them), so every document is
+parsed and embedded once, on arrival. Gold is a materialized view with no AI
+functions: a materialized view always matches its query and may fall back to
+recomputing all of it, but with no model calls in the query a recompute only
+re-selects columns. On serverless, SDP refreshes gold incrementally; the
+technique is in the event log (`planning_information` events).
 
 **Parse once, enrich many times:** parsing (the most expensive call) has its
 own table. `silver_documents` filters to valid rows before calling a model, so
-no AI call ever sees an empty or failed parse, and changing the topic labels
-re-runs classification without re-parsing anything. Failed parses are never
+no AI call ever sees an empty or failed parse. `silver_chunks` also reads
+`silver_parsed` directly, and gold joins topic and sentiment back on `doc_id`,
+so changing the topic labels and fully refreshing `silver_documents` alone
+re-classifies the corpus without re-parsing or re-embedding anything. Failed parses are never
 dropped; list them with:
 
 ```sql
@@ -75,27 +76,29 @@ WHERE NOT is_valid;
 
 **Index straight from the MV:** the Delta Sync index sources directly from the
 `gold_rag_chunks` MV and syncs the precomputed `embedding` column, so there is
-no manual push step. This needs:
+no manual push step. An MV source needs external metadata (also called Smart
+Clone) enabled on the MV: `pipelines.externalMetadata.enabled=true` plus
+`delta.enableChangeDataFeed=true`, both already set in
+`src/pipelines/gold_rag_chunks.py`. External data access for pipeline tables is
+in Public Preview.
 
-1. The **AI Search on materialized views** preview enabled on the workspace
-   (ask your Databricks account team).
-2. On the MV, `pipelines.externalMetadata.enabled=true` and
-   `delta.enableChangeDataFeed=true` (already set in
-   `src/pipelines/gold_rag_chunks.py`).
+If your workspace still rejects the MV as a source, point the index at the
+`silver_chunks` streaming table instead (see `docs/reproducibility.md`).
 
-Without the preview, point the index at the `silver_chunks` streaming table
-instead (`source_table` in `resources/ai_sdp.vector_search.yml`). It carries the
-same columns, still auto-syncs, and the rest of the pipeline stays the same.
+**Sync after every run:** the index is `TRIGGERED`, so the job's second task
+(`src/jobs/sync_index.py`) starts a sync once the pipeline finishes and waits
+until the index has caught up. New documents are searchable when the job
+succeeds.
 
 ## Repository layout
 
 ```
 ai-sdp/
-├── databricks.yml                 # Asset Bundle: variables, dev/prod targets
+├── databricks.yml                 # Bundle: variables, dev/prod targets
 ├── example.local.yml.example      # Template for your own (gitignored) targets
 ├── resources/
 │   ├── ai_sdp.pipeline.yml        # Serverless SDP pipeline (PREVIEW channel)
-│   ├── ai_sdp.job.yml             # File-arrival job that runs the pipeline
+│   ├── ai_sdp.job.yml             # File-arrival job: run pipeline, then sync index
 │   └── ai_sdp.vector_search.yml   # AI Search endpoint + Delta Sync index
 ├── src/
 │   ├── pipelines/                 # One file per table
@@ -104,6 +107,8 @@ ai-sdp/
 │   │   ├── silver_documents.py
 │   │   ├── silver_chunks.py
 │   │   └── gold_rag_chunks.py
+│   ├── sql_pipeline/              # The same five tables in SQL (not deployed by default)
+│   ├── jobs/sync_index.py         # Job task: sync the AI Search index and wait
 │   ├── agents/rag_agent.py        # RAG agent, usable as a CLI
 │   └── app/                       # Databricks App (Streamlit)
 │       ├── app.py, app.yaml, requirements.txt, databricks_logo.svg
@@ -121,9 +126,14 @@ ai-sdp/
 
 - A Databricks workspace with serverless compute, in a region where
   Foundation Model APIs and AI Functions are available.
-- `ai_prep_search` (Beta) enabled for the workspace, and ideally the AI Search
-  on materialized views preview (see above for the fallback).
-- A recent Databricks CLI (built and tested with v1.17), authenticated:
+- `ai_prep_search` (Beta) enabled for the workspace. Statuses as of
+  November 2026: `ai_prep_search` is Beta, `ai_analyze_sentiment` is Public
+  Preview, external data access for pipeline tables (needed to index the MV) is
+  Public Preview; `ai_parse_document`, `ai_classify` and `ai_query` are GA.
+- Databricks Runtime 18.2+ on serverless environment version 3+ for
+  `ai_prep_search` (the pipeline pins the `PREVIEW` channel; see the note in
+  `resources/ai_sdp.pipeline.yml`).
+- Databricks CLI 1.8 or later (built and tested with v1.17), authenticated:
   ```bash
   databricks auth login --host https://<your-workspace>.cloud.databricks.com --profile <your-profile>
   ```
@@ -157,7 +167,8 @@ databricks bundle deploy   --profile $P
 # 3. Run the pipeline once (bronze → silver → gold).
 databricks bundle run ai_sdp_rag --profile $P
 
-# 4. Sync the index (TRIGGERED: it reads only what changed in gold).
+# 4. Sync the index (TRIGGERED: it reads only what changed in gold). Runs
+#    triggered by file arrival do this in the job's sync_index task.
 databricks vector-search-indexes sync-index \
   ai_sdp_catalog.rag_dev.gold_rag_chunks_index --profile $P
 ```
@@ -169,8 +180,15 @@ was still provisioning; wait until it is `ONLINE` and run `bundle deploy` again.
 `data_generation/generated_docs/later/` to
 `/Volumes/ai_sdp_catalog/rag_dev/raw_docs/documents/`. Within about a minute the
 file-arrival trigger starts a run in which every streaming table processes
-exactly one row and gold appends only the new chunks. Sync the index again and
-the new document is searchable.
+exactly one row and gold refreshes incrementally. The job then syncs the index,
+and the new document is searchable. To see the refresh technique gold used:
+
+```sql
+SELECT timestamp, message
+FROM event_log(TABLE(ai_sdp_catalog.rag_dev.gold_rag_chunks))
+WHERE event_type = 'planning_information'
+ORDER BY timestamp DESC;
+```
 
 ### Deploy the app
 
@@ -211,12 +229,14 @@ RAG_INDEX=ai_sdp_catalog.rag_dev.gold_rag_chunks_index \
 
 ## Limitations
 
-- **New documents only.** Streaming tables append, so an edited file isn't
-  re-processed by default and a deleted file's chunks stay in the index. A
+- **New documents only.** The file-arrival trigger fires for new files only
+  (overwriting a file with the same name does not start a run), and streaming
+  tables append, so an edited file isn't re-processed by default and a deleted
+  file's chunks stay in the index. Upload a new version under a new file name. A
   production version would use AUTO CDC keyed on `chunk_id` and remove a
   document's old chunks by `doc_id`.
-- **Previews.** `ai_prep_search` is Beta and AI Search on materialized views is
-  a preview; both may change before GA.
+- **Previews.** `ai_prep_search` is Beta, `ai_analyze_sentiment` and external
+  data access for pipeline tables are Public Preview; all may change before GA.
 - **Sample corpus.** The generated documents are short and produce one chunk
   each. Test chunk counts, cost and retrieval quality on your own documents.
 

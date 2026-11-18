@@ -42,8 +42,9 @@ flowchart TD
     SRC        -->|"Auto Loader — cloudFiles, binaryFile"| BRONZE
     BRONZE     -->|"ai_parse_document → text"| SILVER_PAR
     SILVER_PAR -->|"WHERE is_valid<br/>ai_classify · ai_analyze_sentiment"| SILVER_DOC
-    SILVER_DOC -->|"ai_prep_search → chunks  ·  posexplode<br/>ai_query → embeddings (gte‑large‑en)"| SILVER_CHK
-    SILVER_CHK -->|"pure projection — zero AI function calls"| GOLD
+    SILVER_PAR -->|"WHERE is_valid<br/>ai_prep_search → chunks  ·  posexplode<br/>ai_query → embeddings (gte‑large‑en)"| SILVER_CHK
+    SILVER_CHK -->|"valid chunks — zero AI function calls"| GOLD
+    SILVER_DOC -->|"topic · sentiment, join on doc_id"| GOLD
 
     %% ── VECTOR SEARCH INDEX + CONSUMERS (parallel) ──────────────
     VSIDX[/"gold_rag_chunks_index<br/><b>AI SEARCH INDEX</b>  —  DELTA_SYNC<br/>self-managed embeddings · pk: chunk_id"\]
@@ -56,7 +57,7 @@ flowchart TD
         C4(["Model Serving<br/>feature lookup"])
     end
 
-    GOLD -->|"Delta Sync (auto)<br/>off MV change feed"| VSIDX
+    GOLD -->|"Delta Sync (triggered)<br/>synced by the job after each run"| VSIDX
     GOLD --> C1
     GOLD --> C2
     GOLD --> C3

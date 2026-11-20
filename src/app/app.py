@@ -559,7 +559,8 @@ elif view == "skills":
     st.markdown("### Skills")
     st.markdown(
         "- **Grounded Q&A** over the indexed documents, with source citations.\n"
-        "- **Topic filtering** across product, support, billing, legal, other.\n"
+        "- **Topic labels** (product, support, billing, legal, other) on every document; "
+        "filter retrieval by topic from the CLI agent (`--topic`).\n"
         "- **Deep Research** mode that pulls more passages and synthesizes across sources.")
     st.markdown('<div class="chips-label">Topics covered</div>', unsafe_allow_html=True)
     st.markdown(" ".join(f"`{t}`" for t in TOPICS))

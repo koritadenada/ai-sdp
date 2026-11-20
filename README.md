@@ -97,8 +97,9 @@ Clone) enabled on the MV: `pipelines.externalMetadata.enabled=true` plus
 `src/pipelines/gold_rag_chunks.py`. External data access for pipeline tables is
 in Public Preview.
 
-If your workspace still rejects the MV as a source, point the index at the
-`silver_chunks` materialized view instead (see `docs/reproducibility.md`).
+If your workspace still rejects the MV as a source, there is no table to fall
+back to: every table after bronze is a materialized view (see
+`docs/reproducibility.md`).
 
 **Sync after every run:** the index is `TRIGGERED`, so the job's second task
 (`src/jobs/sync_index.py`) starts a sync once the pipeline finishes and waits
@@ -147,8 +148,9 @@ ai-sdp/
   Preview, external data access for pipeline tables (needed to index the MV) is
   Public Preview; `ai_parse_document`, `ai_classify` and `ai_query` are GA.
 - Databricks Runtime 18.2+ on serverless environment version 3+ for
-  `ai_prep_search` (the pipeline pins the `PREVIEW` channel; see the note in
-  `resources/ai_sdp.pipeline.yml`).
+  `ai_prep_search`, and 17.3 LTS+ for `ai_parse_document`. DBR 18.2 reached end
+  of support on 5 Nov 2026, so the pipeline pins the `PREVIEW` channel
+  (DBR 19, where it was tested); see the note in `resources/ai_sdp.pipeline.yml`.
 - Databricks CLI 1.8 or later (built and tested with v1.17), authenticated:
   ```bash
   databricks auth login --host https://<your-workspace>.cloud.databricks.com --profile <your-profile>

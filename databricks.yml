@@ -1,8 +1,11 @@
-# Databricks Asset Bundle for the ai-sdp RAG data-processing pipeline.
+# Declarative Automation Bundle (formerly Databricks Asset Bundles) for the
+# ai-sdp RAG data-processing pipeline.
 # Docs: https://docs.databricks.com/dev-tools/bundles/
 bundle:
   name: ai-sdp
-  # Direct deployment engine is required for Vector Search resources.
+  # The direct deployment engine is required for the AI Search (vector_search_*)
+  # resources. `engine: direct` works on Databricks CLI 1.8+; this repo was built
+  # and tested with CLI 1.17.
   # https://docs.databricks.com/dev-tools/bundles/direct
   engine: direct
 

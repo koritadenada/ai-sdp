@@ -1,7 +1,7 @@
 # Reproducibility: prerequisites, fallbacks, troubleshooting
 
 Everything in this repo is code: the pipeline, job and AI Search endpoint/index
-deploy from the Asset Bundle, the sample documents come from
+deploy from the Declarative Automation Bundle, the sample documents come from
 `data_generation/generate_documents.py`, and the catalog/schema/volume can come
 from `infra/terraform/`. The README has the full command sequence. This page
 covers what depends on the workspace.
@@ -10,41 +10,38 @@ covers what depends on the workspace.
 
 ### 1. Serverless + AI Functions
 
-Every AI function in the pipeline (`ai_parse_document`, `ai_classify`,
-`ai_analyze_sentiment`, `ai_prep_search`, `ai_query`) calls a Databricks-hosted
-model, so the pipeline runs on serverless compute (`serverless: true` in
-`resources/ai_sdp.pipeline.yml`) in a region where Foundation Model APIs and AI
-Functions are available. The pipeline uses the `PREVIEW` channel because
-`ai_parse_document` needs DBR 17.3+ and `ai_prep_search` needs DBR 18.2+ on
-environment version 3.
+Run the pipeline on serverless compute (`serverless: true` in
+`resources/ai_sdp.pipeline.yml`) in a region where Foundation Model APIs are
+available: AI Functions are not supported on Classic SQL warehouses,
+`ai_parse_document` and `ai_prep_search` need serverless environment version 3,
+and materialized views only refresh incrementally on serverless.
+`ai_parse_document` needs DBR 17.3+ and `ai_prep_search` needs DBR 18.2+. The
+pipeline pins the `PREVIEW` channel; channels map to runtimes and the mapping
+moves (as of October 2026, CURRENT = DBR 18 and PREVIEW = DBR 19), so check the
+runtime in the pipeline event log before you change it.
 
-`ai_prep_search` is in Beta and must be enabled for the workspace. The other
-functions are generally available.
+Statuses as of November 2026: `ai_prep_search` is in Beta and must be enabled
+for the workspace; `ai_analyze_sentiment` is in Public Preview;
+`ai_parse_document`, `ai_classify` and `ai_query` are generally available.
 
 **If missing:** the first update fails at the first AI function call.
 
-### 2. AI Search on materialized views (preview)
+### 2. AI Search on a materialized view
 
 The Delta Sync index sources directly from the `gold_rag_chunks` materialized
-view. That needs the "AI Search on materialized views" preview on the
-workspace; ask your Databricks account team to enable it. The MV side
+view. An MV source needs external metadata (also called Smart Clone) enabled on
+the MV or its pipeline; external data access for pipeline tables is in Public
+Preview (release note, June 5, 2026). The MV side
 (`pipelines.externalMetadata.enabled` and `delta.enableChangeDataFeed`) is
 already configured in `src/pipelines/gold_rag_chunks.py`.
 
-**If missing:** the index is created but its sync fails with
+**If your workspace rejects it:** the index is created but its sync fails with
 `[EXPECT_TABLE_NOT_VIEW] 'DESCRIBE HISTORY' expects a table but ... is a view`.
 
-**Fallback:** point the index at the `silver_chunks` streaming table in
-`resources/ai_sdp.vector_search.yml`:
-
-```yaml
-delta_sync_index_spec:
-  source_table: ${var.catalog}.${var.schema}.silver_chunks
-```
-
-`silver_chunks` carries the same columns as gold (gold only filters out empty
-chunks, which `silver_chunks` already drops with an expectation), and a Delta
-Sync index on a streaming table syncs the same way. Nothing else changes.
+**No fallback table:** every candidate source (gold and the silver tables) is
+a materialized view, so the index needs the workspace to accept MV sources. If
+it doesn't yet, ask your account team about external data access for pipeline
+tables.
 
 ### 3. Permissions
 
@@ -64,15 +61,36 @@ endpoints are usable by default.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `bundle deploy` fails with `AI Search endpoint ... not found` | The endpoint was still provisioning when the index was created | Wait until `databricks vector-search-endpoints get-endpoint ai-sdp-vs-<target>` shows `ONLINE`, then deploy again |
-| Index sync fails with `EXPECT_TABLE_NOT_VIEW` | Workspace lacks the AI Search on MVs preview | See prerequisite 2 |
+| Index sync fails with `EXPECT_TABLE_NOT_VIEW` | The workspace does not accept the MV as a source yet | See prerequisite 2 |
 | Pipeline fails on `ai_prep_search` | Beta not enabled, or not on the PREVIEW channel | See prerequisite 1 |
 | A document never appears in the index | It failed to parse or had no text | `SELECT _source_file, error_status, char_count FROM <catalog>.<schema>.silver_parsed WHERE NOT is_valid` |
-| New documents aren't searchable after a run | The index is `TRIGGERED` and hasn't synced | `databricks vector-search-indexes sync-index <catalog>.<schema>.gold_rag_chunks_index` |
+| New documents aren't searchable after a run | The index is `TRIGGERED` and hasn't synced (the job's `sync_index` task failed, or you ran the pipeline outside the job) | Check the `sync_index` task output, or run `databricks vector-search-indexes sync-index <catalog>.<schema>.gold_rag_chunks_index` |
+| The `sync_index` task fails with `AI Search endpoint ... is stopped` | The endpoint was stopped (for example by an idle policy); the index and its data are kept | Start the endpoint (`databricks api post /api/2.0/vector-search/endpoints/<name>/start`), wait until the index is `ONLINE`, and re-run the job |
+| An update fails with `INCREMENTAL_REFRESH_UNAVAILABLE_WITH_STRICT_REFRESH_POLICY` | You changed the query of an AI MV (labels, prompt, model), which can't be applied incrementally | Full-refresh just that MV (see "Refresh policy and full refreshes") |
+| An edited document isn't updated | The file-arrival trigger fires for new files only | Upload the new version under a new file name |
 | App answers with `Error: ... PERMISSION_DENIED` | The app's service principal lacks grants | Re-run the grants in "Deploy the app" |
 | App crashes with `unexpected keyword argument 'icon'` | Old Streamlit in the Apps runtime | Keep `streamlit>=1.40` in `src/app/requirements.txt` |
 
-## Avoid accidental full refreshes
+## Refresh policy and full refreshes
 
-A full refresh of `silver_parsed`, `silver_documents` or `silver_chunks` re-runs
-every AI call on the whole corpus. Refresh only what you changed, for example
-`databricks bundle run ai_sdp_rag --full-refresh gold_rag_chunks`.
+Every MV that calls a model sets `REFRESH POLICY INCREMENTAL STRICT`, so SDP
+can't silently recompute it (and re-run every model call). When you change one
+of those queries on purpose, the next update fails with
+`INCREMENTAL_REFRESH_UNAVAILABLE_WITH_STRICT_REFRESH_POLICY`. Apply the change
+with a full refresh of just that MV:
+
+- New topic labels: `databricks bundle run ai_sdp_rag --full-refresh silver_documents`
+  (re-classifies only; the chunking MVs read `silver_parsed`, so nothing is
+  re-parsed or re-embedded, and gold picks up the new labels incrementally).
+- New embedding model: `--full-refresh silver_chunks` (re-embeds, no re-chunking).
+- New chunking: `--full-refresh silver_chunk_prep,silver_chunks`.
+- Avoid `--full-refresh-all`: it re-runs every model call on the whole corpus.
+
+Check which technique each MV used:
+
+```sql
+SELECT timestamp, origin.flow_name, message
+FROM event_log(TABLE(<catalog>.<schema>.gold_rag_chunks))
+WHERE event_type = 'planning_information'
+ORDER BY timestamp DESC;
+```

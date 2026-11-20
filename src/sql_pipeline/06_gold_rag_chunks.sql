@@ -1,4 +1,5 @@
--- Gold: curated, retrieval-ready chunks. No AI functions, so a refresh (even a
+-- Gold: curated, retrieval-ready chunks. No AI functions, so it keeps the
+-- default refresh policy, and a refresh (even a
 -- full recompute) never re-embeds. Serves only chunks that passed the
 -- silver_chunks expectations; flagged chunks stay in silver_chunks. Topic and
 -- sentiment are joined from silver_documents, so re-classifying never re-embeds.

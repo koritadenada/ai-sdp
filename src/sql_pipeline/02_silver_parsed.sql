@@ -1,11 +1,14 @@
 -- Silver parsed: parse every document once and flag whether it is usable.
+-- A materialized view with REFRESH POLICY INCREMENTAL STRICT: new documents are
+-- parsed incrementally, and the update fails rather than re-parse the corpus.
 -- Nothing is dropped: the expectation counts failures, failed parses stay here
 -- with is_valid = false. List the files to fix with:
 --   SELECT _source_file, error_status, char_count FROM silver_parsed WHERE NOT is_valid
-CREATE OR REFRESH STREAMING TABLE silver_parsed (
+CREATE OR REFRESH MATERIALIZED VIEW silver_parsed (
   CONSTRAINT is_valid EXPECT (is_valid)   -- count failures, drop nothing
 )
 COMMENT 'Every ingested document parsed once (ai_parse_document), with an is_valid flag.'
+REFRESH POLICY INCREMENTAL STRICT
 TBLPROPERTIES (
   'delta.autoOptimize.optimizeWrite' = 'true',
   'delta.autoOptimize.autoCompact' = 'true'
@@ -39,7 +42,7 @@ FROM (
         substring(sha2(_source_file, 256), 1, 8)) AS doc_id
     FROM (
       SELECT *, ai_parse_document(content) AS parsed
-      FROM STREAM(bronze_documents)
+      FROM bronze_documents
     )
   )
 );

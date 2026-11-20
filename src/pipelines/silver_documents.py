@@ -1,7 +1,7 @@
 """Silver documents: AI-enrich valid parsed documents.
 
-Reads silver_parsed and keeps only rows flagged is_valid, BEFORE any AI call,
-then enriches each document:
+Materialized view over silver_parsed. Keeps only rows flagged is_valid, BEFORE
+any AI call, then enriches each document:
   - ai_analyze_sentiment(body) → sentiment
   - ai_classify(body, '[...]', map('version', '2.1')) → topic
 
@@ -15,11 +15,19 @@ returns a VARIANT; the chosen label is response[0].value. The legacy 1.0 form
 A `topic_in_label_set` expectation counts (but keeps) rows whose label is NULL
 or outside the set, so a classification problem shows up in the pipeline UI.
 
-Changing TOPIC_LABELS applies only to documents processed afterwards. To
-re-classify the existing corpus, full-refresh silver_documents only: it re-reads
-the text in silver_parsed, so no document is parsed again, and nothing is
-re-embedded because silver_chunks reads silver_parsed, not this table. gold
-joins topic and sentiment from here, so the next update picks up the new labels.
+`refresh_policy = "incremental_strict"`: new documents are classified
+incrementally (APPEND_ONLY), and SDP is never allowed to silently re-classify
+the whole corpus. Changing TOPIC_LABELS changes this MV's query, which can't be
+applied incrementally, so the next update FAILS with
+INCREMENTAL_REFRESH_UNAVAILABLE_WITH_STRICT_REFRESH_POLICY until you re-classify
+on purpose:
+
+    databricks bundle run ai_sdp_rag --full-refresh silver_documents
+
+That re-reads the text in silver_parsed (nothing is re-parsed), and nothing is
+re-embedded because silver_chunk_prep / silver_chunks read silver_parsed, not
+this table. gold joins topic and sentiment from here and picks up the new
+labels incrementally on the next update.
 
 Both enrichment calls hit Databricks-hosted Foundation Models, so this must run
 serverless in a Foundation Model API region.
@@ -37,9 +45,10 @@ LABELS_JSON = json.dumps(TOPIC_LABELS)
 LABELS_SQL = ", ".join(f"'{label}'" for label in TOPIC_LABELS)
 
 
-@dp.table(
+@dp.materialized_view(
     name="silver_documents",
     comment="Valid parsed documents, AI-enriched with topic and sentiment.",
+    refresh_policy="incremental_strict",
     cluster_by=["topic"],
     table_properties={
         "delta.autoOptimize.optimizeWrite": "true",
@@ -50,7 +59,7 @@ LABELS_SQL = ", ".join(f"'{label}'" for label in TOPIC_LABELS)
 @dp.expect("topic_in_label_set", f"topic IN ({LABELS_SQL})")
 def silver_documents():
     return (
-        spark.readStream.table("silver_parsed")
+        spark.read.table("silver_parsed")
         # Filter first: only valid documents reach the AI functions below.
         .where("is_valid")
         .withColumn("sentiment", F.expr("ai_analyze_sentiment(body)"))

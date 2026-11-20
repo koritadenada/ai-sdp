@@ -15,10 +15,12 @@ Run the pipeline on serverless compute (`serverless: true` in
 available: AI Functions are not supported on Classic SQL warehouses,
 `ai_parse_document` and `ai_prep_search` need serverless environment version 3,
 and materialized views only refresh incrementally on serverless.
-`ai_parse_document` needs DBR 17.3+ and `ai_prep_search` needs DBR 18.2+. The
-pipeline pins the `PREVIEW` channel; channels map to runtimes and the mapping
-moves (as of October 2026, CURRENT = DBR 18 and PREVIEW = DBR 19), so check the
-runtime in the pipeline event log before you change it.
+`ai_parse_document` needs DBR 17.3 LTS+ and `ai_prep_search` needs DBR 18.2+.
+DBR 18.2 reached end of support on 5 Nov 2026 and the Runtime 18 release notes
+list no later 18.x, so the pipeline pins the `PREVIEW` channel (DBR 19, where it
+was tested). Channels map to runtimes and the mapping moves (as of November
+2026, CURRENT = DBR 18 and PREVIEW = DBR 19), so check the runtime in the
+pipeline event log before you change it.
 
 Statuses as of November 2026: `ai_prep_search` is in Beta and must be enabled
 for the workspace; `ai_analyze_sentiment` is in Public Preview;

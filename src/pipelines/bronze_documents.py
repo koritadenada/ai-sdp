@@ -3,6 +3,9 @@
 Streams raw document *files* (PDF, DOCX, PPTX, PNG, JPEG, TIFF, ...) from a
 Unity Catalog volume using Auto Loader in binaryFile mode. Append-only: we keep
 the raw bytes plus provenance so silver can parse them with ai_parse_document.
+
+This is the pipeline's only streaming table (Auto Loader needs one). Everything
+downstream, including every AI function call, is a materialized view.
 """
 
 from pyspark import pipelines as dp
@@ -18,6 +21,9 @@ RAW_DOCS_PATH = spark.conf.get("raw_docs_path")
     table_properties={
         "delta.autoOptimize.optimizeWrite": "true",
         "delta.autoOptimize.autoCompact": "true",
+        # Row tracking lets the downstream materialized views refresh
+        # incrementally from this table.
+        "delta.enableRowTracking": "true",
     },
 )
 def bronze_documents():

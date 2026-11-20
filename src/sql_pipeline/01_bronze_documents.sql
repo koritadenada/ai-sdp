@@ -1,11 +1,14 @@
 -- Bronze: raw document ingest (binary). No AI calls.
+-- The pipeline's only streaming table (Auto Loader needs one); every AI call
+-- downstream runs in a materialized view.
 -- Auto Loader (read_files in a streaming query) in binaryFile mode keeps the raw
 -- bytes in `content` plus `path`, `length` and `modificationTime`.
 CREATE OR REFRESH STREAMING TABLE bronze_documents
 COMMENT 'Raw ingested document files (binary) with provenance metadata.'
 TBLPROPERTIES (
   'delta.autoOptimize.optimizeWrite' = 'true',
-  'delta.autoOptimize.autoCompact' = 'true'
+  'delta.autoOptimize.autoCompact' = 'true',
+  'delta.enableRowTracking' = 'true'   -- lets downstream MVs refresh incrementally
 )
 AS SELECT
   *,

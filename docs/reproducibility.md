@@ -38,20 +38,10 @@ already configured in `src/pipelines/gold_rag_chunks.py`.
 **If your workspace rejects it:** the index is created but its sync fails with
 `[EXPECT_TABLE_NOT_VIEW] 'DESCRIBE HISTORY' expects a table but ... is a view`.
 
-**Fallback:** point the index at the `silver_chunks` streaming table in
-`resources/ai_sdp.vector_search.yml`:
-
-```yaml
-delta_sync_index_spec:
-  source_table: ${var.catalog}.${var.schema}.silver_chunks
-```
-
-A Delta Sync index on a streaming table syncs the same way, with two
-differences: `silver_chunks` has no `topic`/`sentiment` columns (gold joins them
-in from `silver_documents`), so topic filtering in the app won't work, and it
-keeps flagged chunks (empty text or a bad embedding) that gold filters out, so
-filter those in your retrieval query. The index then syncs from silver rather
-than from the gold serving layer.
+**No fallback table:** every candidate source (gold and the silver tables) is
+a materialized view, so the index needs the workspace to accept MV sources. If
+it doesn't yet, ask your account team about external data access for pipeline
+tables.
 
 ### 3. Permissions
 
@@ -75,19 +65,32 @@ endpoints are usable by default.
 | Pipeline fails on `ai_prep_search` | Beta not enabled, or not on the PREVIEW channel | See prerequisite 1 |
 | A document never appears in the index | It failed to parse or had no text | `SELECT _source_file, error_status, char_count FROM <catalog>.<schema>.silver_parsed WHERE NOT is_valid` |
 | New documents aren't searchable after a run | The index is `TRIGGERED` and hasn't synced (the job's `sync_index` task failed, or you ran the pipeline outside the job) | Check the `sync_index` task output, or run `databricks vector-search-indexes sync-index <catalog>.<schema>.gold_rag_chunks_index` |
+| The `sync_index` task fails with `AI Search endpoint ... is stopped` | The endpoint was stopped (for example by an idle policy); the index and its data are kept | Start the endpoint (`databricks api post /api/2.0/vector-search/endpoints/<name>/start`), wait until the index is `ONLINE`, and re-run the job |
+| An update fails with `INCREMENTAL_REFRESH_UNAVAILABLE_WITH_STRICT_REFRESH_POLICY` | You changed the query of an AI MV (labels, prompt, model), which can't be applied incrementally | Full-refresh just that MV (see "Refresh policy and full refreshes") |
 | An edited document isn't updated | The file-arrival trigger fires for new files only | Upload the new version under a new file name |
 | App answers with `Error: ... PERMISSION_DENIED` | The app's service principal lacks grants | Re-run the grants in "Deploy the app" |
 | App crashes with `unexpected keyword argument 'icon'` | Old Streamlit in the Apps runtime | Keep `streamlit>=1.40` in `src/app/requirements.txt` |
 
-## Avoid accidental full refreshes
+## Refresh policy and full refreshes
 
-A full refresh of a streaming table re-runs every AI call in it on the whole
-corpus, so refresh only what you changed:
+Every MV that calls a model sets `REFRESH POLICY INCREMENTAL STRICT`, so SDP
+can't silently recompute it (and re-run every model call). When you change one
+of those queries on purpose, the next update fails with
+`INCREMENTAL_REFRESH_UNAVAILABLE_WITH_STRICT_REFRESH_POLICY`. Apply the change
+with a full refresh of just that MV:
 
 - New topic labels: `databricks bundle run ai_sdp_rag --full-refresh silver_documents`
-  (re-classifies only; `silver_chunks` reads `silver_parsed`, so nothing is
-  re-parsed or re-embedded, and gold picks up the new labels on the next run).
-- New embedding model or chunking: full-refresh `silver_chunks` (re-embeds).
-- A full refresh of `silver_parsed` re-parses everything, and its downstream
-  streaming tables (`silver_documents`, `silver_chunks`) then need a full
-  refresh too: a streaming table can't keep reading a fully refreshed source.
+  (re-classifies only; the chunking MVs read `silver_parsed`, so nothing is
+  re-parsed or re-embedded, and gold picks up the new labels incrementally).
+- New embedding model: `--full-refresh silver_chunks` (re-embeds, no re-chunking).
+- New chunking: `--full-refresh silver_chunk_prep,silver_chunks`.
+- Avoid `--full-refresh-all`: it re-runs every model call on the whole corpus.
+
+Check which technique each MV used:
+
+```sql
+SELECT timestamp, origin.flow_name, message
+FROM event_log(TABLE(<catalog>.<schema>.gold_rag_chunks))
+WHERE event_type = 'planning_information'
+ORDER BY timestamp DESC;
+```

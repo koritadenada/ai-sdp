@@ -28,11 +28,13 @@ flowchart TD
 
         BRONZE["bronze_documents<br/><b>STREAMING TABLE</b><br/>raw bytes · provenance · source path"]
 
-        SILVER_PAR["silver_parsed<br/><b>STREAMING TABLE</b><br/>parsed once · body text<br/>is_valid · error_status"]
+        SILVER_PAR("silver_parsed<br/><b>MATERIALIZED VIEW · STRICT</b><br/>parsed once · body text<br/>is_valid · error_status")
 
-        SILVER_DOC["silver_documents<br/><b>STREAMING TABLE</b><br/>valid documents only<br/>topic · sentiment"]
+        SILVER_DOC("silver_documents<br/><b>MATERIALIZED VIEW · STRICT</b><br/>valid documents only<br/>topic · sentiment")
 
-        SILVER_CHK["silver_chunks<br/><b>STREAMING TABLE</b><br/>one row per chunk<br/>1024-dim embedding · embed-once"]
+        SILVER_PREP("silver_chunk_prep<br/><b>MATERIALIZED VIEW · STRICT</b><br/>ai_prep_search output, stored")
+
+        SILVER_CHK("silver_chunks<br/><b>MATERIALIZED VIEW · STRICT</b><br/>one row per chunk<br/>1024-dim embedding · embed-once")
 
         GOLD("gold_rag_chunks<br/><b>MATERIALIZED VIEW</b><br/>curated · retrieval-ready<br/>exposes Change Data Feed")
 
@@ -42,7 +44,8 @@ flowchart TD
     SRC        -->|"Auto Loader — cloudFiles, binaryFile"| BRONZE
     BRONZE     -->|"ai_parse_document → text"| SILVER_PAR
     SILVER_PAR -->|"WHERE is_valid<br/>ai_classify · ai_analyze_sentiment"| SILVER_DOC
-    SILVER_PAR -->|"WHERE is_valid<br/>ai_prep_search → chunks  ·  posexplode<br/>ai_query → embeddings (gte‑large‑en)"| SILVER_CHK
+    SILVER_PAR -->|"WHERE is_valid<br/>ai_prep_search → chunks"| SILVER_PREP
+    SILVER_PREP -->|"posexplode stored chunks<br/>ai_query → embeddings (gte‑large‑en)"| SILVER_CHK
     SILVER_CHK -->|"valid chunks — zero AI function calls"| GOLD
     SILVER_DOC -->|"topic · sentiment, join on doc_id"| GOLD
 
@@ -80,7 +83,7 @@ flowchart TD
     %% ── CLASS ASSIGNMENTS ───────────────────────────────────────
     class SRC volume
     class BRONZE stBronze
-    class SILVER_PAR,SILVER_DOC,SILVER_CHK stSilver
+    class SILVER_PAR,SILVER_DOC,SILVER_PREP,SILVER_CHK mvGold
     class GOLD mvGold
     class VSIDX vsIdx
     class C1,C2,C3,C4 consumer

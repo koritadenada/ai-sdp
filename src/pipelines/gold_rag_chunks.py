@@ -1,16 +1,14 @@
 """Gold: curated RAG-ready chunks (materialized view).
 
-Materialized view over the silver_chunks streaming table, joined on doc_id with
-the topic and sentiment from silver_documents. All expensive,
-non-deterministic work (ai_prep_search + the ai_query embedding call) already
-happened incrementally upstream in silver_chunks — embedded once per document.
+Valid chunks from silver_chunks joined on doc_id with the topic and sentiment
+from silver_documents. All the model calls (parse, classify, sentiment, chunk,
+embed) already happened upstream, each in its own materialized view.
 
-What makes this MV cheap is that NO AI functions run in it, so refreshing it
-can never re-invoke a model or re-embed anything, even if SDP falls back to a
-full recompute (a materialized view always matches its query, and may recompute
-the whole query to get there). On serverless, a filter + select over a streaming
-table, joined to another streaming table, is also a shape SDP can refresh
-incrementally; check the technique in the event log:
+Gold calls no AI functions, so it keeps the default refresh policy: SDP
+refreshes it incrementally on serverless (APPEND_ONLY for a new document,
+ROW_BASED after a re-classification), and if it ever falls back to a full
+recompute, that only re-joins columns that already exist. Check the technique in
+the event log:
 
     SELECT timestamp, message
     FROM event_log(TABLE(<catalog>.<schema>.gold_rag_chunks))
@@ -63,7 +61,7 @@ VALID_CHUNK = (
 def gold_rag_chunks():
     # Document-level enrichment, joined onto each chunk. Kept out of
     # silver_chunks so re-classifying (a full refresh of silver_documents)
-    # never forces a re-embed.
+    # never re-embeds.
     enrichment = spark.read.table("silver_documents").select("doc_id", "topic", "sentiment")
     return (
         spark.read.table("silver_chunks")

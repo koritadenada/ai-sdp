@@ -1,14 +1,15 @@
--- Silver chunks: semantic chunking (ai_prep_search) + self-managed embeddings
--- (ai_query, databricks-gte-large-en, 1024 dims), once per document.
+-- Silver chunks: explode the STORED ai_prep_search output into one row per
+-- chunk, then embed each chunk (ai_query, databricks-gte-large-en, 1024 dims).
+-- INCREMENTAL STRICT: only new chunks are embedded, never the corpus again.
 -- Unusable chunks are kept and counted by the expectations; gold filters them.
--- Reads silver_parsed (not silver_documents) so re-classifying never re-embeds.
-CREATE OR REFRESH STREAMING TABLE silver_chunks (
+CREATE OR REFRESH MATERIALIZED VIEW silver_chunks (
   CONSTRAINT has_text
     EXPECT (length(trim(chunk_to_retrieve)) > 0 AND length(trim(chunk_to_embed)) > 0),
   CONSTRAINT embedding_ok
     EXPECT (embedding IS NOT NULL AND size(embedding) = 1024)
 )
-COMMENT 'Semantic chunks (ai_prep_search) with gte-large-en embeddings, computed once per document.'
+COMMENT 'Semantic chunks (ai_prep_search) with gte-large-en embeddings, computed once per chunk.'
+REFRESH POLICY INCREMENTAL STRICT
 CLUSTER BY (doc_id)
 TBLPROPERTIES (
   'delta.autoOptimize.optimizeWrite' = 'true',
@@ -32,10 +33,9 @@ FROM (
   FROM (
     SELECT
       doc_id,
-      _source_file AS source,
-      posexplode(variant_get(ai_prep_search(parsed), '$.document.contents',
-                             'ARRAY<VARIANT>')) AS (chunk_pos, chunk)
-    FROM STREAM(silver_parsed)
-    WHERE is_valid   -- filter BEFORE any AI call
+      source,
+      posexplode(variant_get(prep, '$.document.contents', 'ARRAY<VARIANT>'))
+        AS (chunk_pos, chunk)
+    FROM silver_chunk_prep
   )
 );

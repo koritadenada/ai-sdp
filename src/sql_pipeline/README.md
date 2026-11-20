@@ -1,6 +1,7 @@
 # SQL version of the pipeline
 
-The same five tables as `src/pipelines/` (Python), written in SQL. The blog post
+The same six tables as `src/pipelines/` (Python), written in SQL: one streaming
+table (bronze, Auto Loader) and five materialized views. The blog post
 shows these snippets; the Python files remain what the bundle deploys.
 
 To deploy the SQL version instead, change the library glob in

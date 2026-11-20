@@ -17,30 +17,31 @@ raw document files (PDF/DOCX/PNG) in a UC volume
         │  Auto Loader (cloudFiles, binaryFile); file-arrival job trigger
         ▼
 ┌──────────────────┐
-│ bronze_documents │  raw binary ingest + provenance (_ingested_at, _source_file)
-│  (streaming tbl) │  no AI calls
+│ bronze_documents │  raw binary ingest + provenance; no AI calls
+│  (streaming tbl) │  the only streaming table
 └──────────────────┘
-        │
         ▼
 ┌──────────────────┐
-│ silver_parsed    │  ai_parse_document → text, ONCE per file
-│  (streaming tbl) │  error_status · char_count · is_valid (failures kept, flagged)
+│ silver_parsed    │  ai_parse_document → text
+│  (MV, STRICT)    │  error_status · char_count · is_valid (failures kept, flagged)
 └──────────────────┘
-        │  WHERE is_valid (filtered BEFORE any AI call), feeds both tables below
+        │  WHERE is_valid (filtered BEFORE any AI call), feeds both branches
         ├───────────────────────────────┐
         ▼                               ▼
-┌──────────────────┐          ┌──────────────────┐
-│ silver_documents │          │ silver_chunks    │
-│  (streaming tbl) │          │  (streaming tbl) │
-└──────────────────┘          └──────────────────┘
-  ai_analyze_sentiment → sentiment   ai_prep_search → semantic chunks
-  ai_classify (v2.1)   → topic       ai_query(gte-large-en) → 1024-dim embedding
-        │                               │  ONCE per chunk
+┌──────────────────┐          ┌───────────────────┐
+│ silver_documents │          │ silver_chunk_prep │  ai_prep_search → chunks (stored)
+│  (MV, STRICT)    │          │  (MV, STRICT)     │
+└──────────────────┘          └───────────────────┘
+  ai_analyze_sentiment                  ▼
+  ai_classify (v2.1)          ┌───────────────────┐
+        │                     │ silver_chunks     │  posexplode the stored chunks,
+        │                     │  (MV, STRICT)     │  ai_query(gte-large-en) → embedding
+        │                     └───────────────────┘
         └───────────────┬───────────────┘
                         ▼  join on doc_id
               ┌──────────────────┐
               │ gold_rag_chunks  │  chunks + topic/sentiment, valid chunks only;
-              │  (mat. view)     │  no AI functions
+              │  (MV)            │  no AI functions
               └──────────────────┘
         │  Delta Sync, self-managed embeddings
         ▼
@@ -52,20 +53,34 @@ raw document files (PDF/DOCX/PNG) in a UC volume
   AI in SDP Agent (Databricks App): embed question → query index → answer with an LLM
 ```
 
-**The one rule:** AI function calls live only in streaming tables, which
-process each row once (until you full-refresh them), so every document is
-parsed and embedded once, on arrival. Gold is a materialized view with no AI
-functions: a materialized view always matches its query and may fall back to
-recomputing all of it, but with no model calls in the query a recompute only
-re-selects columns. On serverless, SDP refreshes gold incrementally; the
-technique is in the event log (`planning_information` events).
+**AI Functions in materialized views:** every model call (parse, classify,
+sentiment, chunk, embed) runs in a materialized view. On serverless, SDP
+refreshes these incrementally: when a new document lands, only its row is
+processed (the event log reports `APPEND_ONLY`). Each AI MV sets
+`REFRESH POLICY INCREMENTAL STRICT`, so if SDP ever can't refresh one
+incrementally, the update **fails** instead of silently re-running every model
+call on the whole corpus. Check the technique per MV:
 
-**Parse once, enrich many times:** parsing (the most expensive call) has its
-own table. `silver_documents` filters to valid rows before calling a model, so
-no AI call ever sees an empty or failed parse. `silver_chunks` also reads
-`silver_parsed` directly, and gold joins topic and sentiment back on `doc_id`,
-so changing the topic labels and fully refreshing `silver_documents` alone
-re-classifies the corpus without re-parsing or re-embedding anything. Failed parses are never
+```sql
+SELECT timestamp, origin.flow_name, message
+FROM event_log(TABLE(<catalog>.<schema>.gold_rag_chunks))
+WHERE event_type = 'planning_information'
+ORDER BY timestamp DESC;
+```
+
+**One query-shape pitfall:** exploding an AI function's output in the same
+query, `posexplode(ai_prep_search(parsed))`, can't be refreshed incrementally.
+Under the default policy SDP recomputes that MV on every update, even with no
+new data. That's why chunking is split: `silver_chunk_prep` stores the
+`ai_prep_search` output, and `silver_chunks` explodes the stored column and
+embeds.
+
+**Parse once, enrich many times:** `silver_documents` and the chunking MVs read
+`silver_parsed` side by side, filtered to valid rows before any model call, and
+gold joins topic and sentiment back on `doc_id`. Changing the topic labels makes
+the next update fail (STRICT) until you re-classify on purpose with
+`--full-refresh silver_documents`, which re-classifies the corpus without
+re-parsing or re-embedding anything. Failed parses are never
 dropped; list them with:
 
 ```sql
@@ -83,7 +98,7 @@ Clone) enabled on the MV: `pipelines.externalMetadata.enabled=true` plus
 in Public Preview.
 
 If your workspace still rejects the MV as a source, point the index at the
-`silver_chunks` streaming table instead (see `docs/reproducibility.md`).
+`silver_chunks` materialized view instead (see `docs/reproducibility.md`).
 
 **Sync after every run:** the index is `TRIGGERED`, so the job's second task
 (`src/jobs/sync_index.py`) starts a sync once the pipeline finishes and waits
@@ -105,9 +120,10 @@ ai-sdp/
 │   │   ├── bronze_documents.py
 │   │   ├── silver_parsed.py
 │   │   ├── silver_documents.py
+│   │   ├── silver_chunk_prep.py
 │   │   ├── silver_chunks.py
 │   │   └── gold_rag_chunks.py
-│   ├── sql_pipeline/              # The same five tables in SQL (not deployed by default)
+│   ├── sql_pipeline/              # The same six tables in SQL (not deployed by default)
 │   ├── jobs/sync_index.py         # Job task: sync the AI Search index and wait
 │   ├── agents/rag_agent.py        # RAG agent, usable as a CLI
 │   └── app/                       # Databricks App (Streamlit)
@@ -179,8 +195,8 @@ was still provisioning; wait until it is `ONLINE` and run `bundle deploy` again.
 **See incremental processing:** upload one file from
 `data_generation/generated_docs/later/` to
 `/Volumes/ai_sdp_catalog/rag_dev/raw_docs/documents/`. Within about a minute the
-file-arrival trigger starts a run in which every streaming table processes
-exactly one row and gold refreshes incrementally. The job then syncs the index,
+file-arrival trigger starts a run in which bronze ingests one row and every
+materialized view refreshes incrementally (`APPEND_ONLY`). The job then syncs the index,
 and the new document is searchable. To see the refresh technique gold used:
 
 ```sql
@@ -230,9 +246,14 @@ RAG_INDEX=ai_sdp_catalog.rag_dev.gold_rag_chunks_index \
 ## Limitations
 
 - **New documents only.** The file-arrival trigger fires for new files only
-  (overwriting a file with the same name does not start a run), and streaming
-  tables append, so an edited file isn't re-processed by default and a deleted
-  file's chunks stay in the index. Upload a new version under a new file name. A
+  (overwriting a file with the same name does not start a run), and bronze is
+  an append-only streaming table, so an edited file isn't re-processed by
+  default and a deleted file's chunks stay in the index. Upload a new version
+  under a new file name.
+- **STRICT means changes are deliberate.** A changed label set, prompt or
+  embedding model can't be applied incrementally, so the next update fails
+  until you full-refresh that MV. That's intended: it stops a code change from
+  silently re-running model calls on the whole corpus. A
   production version would use AUTO CDC keyed on `chunk_id` and remove a
   document's old chunks by `doc_id`.
 - **Previews.** `ai_prep_search` is Beta, `ai_analyze_sentiment` and external

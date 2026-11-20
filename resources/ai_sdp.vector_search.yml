@@ -12,9 +12,9 @@
 # enabled on the MV or its pipeline. That is set in the MV's table properties
 # (src/pipelines/gold_rag_chunks.py); external data access for pipeline tables
 # is in Public Preview (release note, June 5, 2026). If your workspace still
-# rejects the MV as a source (sync fails with EXPECT_TABLE_NOT_VIEW), set
-# source_table to the silver_chunks streaming table instead and add the same
-# validity filter gold applies (see docs/reproducibility.md).
+# rejects the MV as a source (sync fails with EXPECT_TABLE_NOT_VIEW), there is
+# no streaming-table fallback: every table in this pipeline downstream of
+# bronze is a materialized view (see docs/reproducibility.md).
 resources:
   vector_search_endpoints:
     ai_sdp_vs:

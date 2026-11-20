@@ -74,11 +74,19 @@ class RagAgent:
         resp = self.w.serving_endpoints.query(name=EMBED_ENDPOINT, input=[text])
         return resp.data[0].embedding
 
-    def retrieve(self, question: str, k: int = 4, topic: str | None = None) -> list[dict]:
+    def retrieve(
+        self,
+        question: str,
+        k: int = 4,
+        topic: str | None = None,
+        vector: list[float] | None = None,
+    ) -> list[dict]:
+        # Callers that already embedded the question (the app) pass `vector`
+        # so the embedding endpoint isn't called twice.
         kwargs = dict(
             index_name=INDEX,
             columns=RETRIEVE_COLS,
-            query_vector=self.embed(question),
+            query_vector=vector if vector is not None else self.embed(question),
             num_results=k,
         )
         if topic:

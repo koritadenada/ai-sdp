@@ -60,14 +60,6 @@ RAG_INDEX=ai_sdp_catalog.rag_dev.gold_rag_chunks_index \
   .venv/bin/python src/agents/rag_agent.py --profile $P "How do I reset my password?"
 ```
 
-## Limitations
-
-- Only new files are processed. Upload an edited document under a new name.
-- Changing a label set, prompt or model makes the next update fail until you
-  full-refresh that MV on purpose (see `docs/reproducibility.md`).
-- `ai_prep_search` is Beta; `ai_analyze_sentiment` and external data access for
-  pipeline tables are Public Preview.
-
 ## License
 
 Apache 2.0, see [LICENSE](LICENSE). Databricks logos and icons are trademarks of

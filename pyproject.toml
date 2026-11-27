@@ -13,12 +13,6 @@ dev = [
   "databricks-sdk>=0.122",
   "ruff>=0.15",
 ]
-# Sample-document generation (data_generation/generate_documents.py, run by seed.sh).
-docgen = [
-  "python-docx>=1.1",
-  "fpdf2>=2.7",
-  "Pillow>=10.0",
-]
 
 [build-system]
 requires = ["hatchling"]

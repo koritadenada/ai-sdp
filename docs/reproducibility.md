@@ -1,9 +1,8 @@
 # Reproducibility: prerequisites, fallbacks, troubleshooting
 
 Everything in this repo is code: the pipeline, job and AI Search endpoint/index
-deploy from the Declarative Automation Bundle, the sample documents come from
-`data_generation/generate_documents.py`, and the catalog/schema/volume can come
-from `infra/terraform/`. The README has the full command sequence. This page
+deploy from the Declarative Automation Bundle, and the catalog/schema/volume
+can come from `infra/terraform/` (or the CLI commands in the README). The README has the full command sequence. This page
 covers what depends on the workspace.
 
 ## Workspace prerequisites
@@ -48,7 +47,7 @@ tables.
 ### 3. Permissions
 
 The deploying user needs to create pipelines, jobs and AI Search endpoints, and
-needs `USE CATALOG`, `CREATE SCHEMA` (for `seed.sh`) and write access
+needs `USE CATALOG`, `CREATE SCHEMA` and write access
 on the target catalog. If you can't use the default `ai_sdp_catalog`, pass
 `--var catalog=<your_catalog>` or add a target in a `*.local.yml` file (see
 `example.local.yml.example`).

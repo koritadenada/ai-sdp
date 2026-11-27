@@ -21,9 +21,7 @@ terraform.tfvars
 .DS_Store
 
 # Build outputs
-data_generation/generated_docs/
 *.parquet
-data_generation/**/*.json
 dist/
 build/
 *.zip

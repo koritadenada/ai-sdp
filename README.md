@@ -29,27 +29,26 @@ troubleshooting are in [docs/reproducibility.md](docs/reproducibility.md).
   to index an MV) enabled.
 - An existing catalog you can write to (default `ai_sdp_catalog`).
 - Databricks CLI 1.8+, authenticated: `databricks auth login --profile <your-profile>`.
-- Python 3.11+ in a `.venv` at the repo root, for the sample documents:
-  ```bash
-  python3 -m venv .venv && .venv/bin/pip install databricks-sdk python-docx fpdf2 Pillow
-  ```
+- Python 3.11+ with `databricks-sdk` to ask questions from the command line.
+- A few documents to index (PDF, DOCX or PNG).
 
 ## Deploy
 
 ```bash
 P=<your-profile>
-data_generation/seed.sh $P ai_sdp_catalog rag_dev   # schema, volume, 10 sample docs
+databricks schemas create rag_dev ai_sdp_catalog --profile $P
+databricks volumes create ai_sdp_catalog rag_dev raw_docs MANAGED --profile $P
+databricks fs cp -r <your-docs-folder> dbfs:/Volumes/ai_sdp_catalog/rag_dev/raw_docs/documents --profile $P
 databricks bundle deploy --profile $P               # pipeline, job, AI Search index
 databricks bundle run ai_sdp_ingest --profile $P    # run the pipeline, then sync the index
 ```
 
-To use another catalog, pass it to `seed.sh` and add
+To use another catalog, use it in the first three commands and add
 `--var catalog=<your_catalog>` to the `bundle` commands. If the first deploy
 fails with `AI Search endpoint ... not found`, the endpoint is still starting:
 deploy again once it's `ONLINE`.
 
-**See it run incrementally:** upload a file from
-`data_generation/generated_docs/later/` to
+**See it run incrementally:** upload one more document to
 `/Volumes/ai_sdp_catalog/rag_dev/raw_docs/documents/`. Within about a minute
 the job processes just that document and syncs the index.
 
@@ -57,7 +56,7 @@ the job processes just that document and syncs the index.
 
 ```bash
 RAG_INDEX=ai_sdp_catalog.rag_dev.gold_rag_chunks_index \
-  .venv/bin/python src/agents/rag_agent.py --profile $P "How do I reset my password?"
+  python src/agents/rag_agent.py --profile $P "<a question about your documents>"
 ```
 
 ## License

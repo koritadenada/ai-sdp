@@ -106,8 +106,12 @@ class RagAgent:
         topic: str | None = None,
         system: str = ANSWER_PROMPT,
         max_tokens: int = 400,
+        hits: list[dict] | None = None,
     ) -> dict:
-        hits = self.retrieve(question, k=k, topic=topic)
+        # Callers that already retrieved the passages (the app, which shows the
+        # search step) pass `hits` so the index isn't queried twice.
+        if hits is None:
+            hits = self.retrieve(question, k=k, topic=topic)
         if not hits:
             return {"answer": "No relevant passages were found in the index.", "sources": []}
         context = "\n\n".join(

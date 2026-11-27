@@ -5,11 +5,16 @@
 # `embedding` (gte-large-en), so the index syncs that vector column rather than
 # computing embeddings itself.
 #
-# Prerequisite: the "AI Search on materialized views" preview must be enabled on
-# the workspace (ask your Databricks account team). The MV's table properties
-# (src/pipelines/gold_rag_chunks.py) do the rest. Without the preview, set
-# source_table to the silver_chunks streaming table instead; it carries the same
-# columns and the rest of the pipeline is unchanged.
+# The YAML keys still say vector_search_*: AI Search was formerly called Vector
+# Search and the bundle resource names have not changed.
+#
+# Prerequisite: an MV source needs external metadata (also called Smart Clone)
+# enabled on the MV or its pipeline. That is set in the MV's table properties
+# (src/pipelines/gold_rag_chunks.py); external data access for pipeline tables
+# is in Public Preview (release note, June 5, 2026). If your workspace still
+# rejects the MV as a source (sync fails with EXPECT_TABLE_NOT_VIEW), there is
+# no streaming-table fallback: every table in this pipeline downstream of
+# bronze is a materialized view (see docs/reproducibility.md).
 resources:
   vector_search_endpoints:
     ai_sdp_vs:
@@ -23,7 +28,7 @@ resources:
       primary_key: chunk_id
       index_type: DELTA_SYNC
       delta_sync_index_spec:
-        # The MV itself is the source — the whole point of the preview.
+        # The MV itself is the source: the index syncs straight from gold.
         source_table: ${var.catalog}.${var.schema}.gold_rag_chunks
         pipeline_type: TRIGGERED
         # Self-managed 1024-dim embedding computed in the pipeline (gte-large-en).

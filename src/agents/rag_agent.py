@@ -74,11 +74,19 @@ class RagAgent:
         resp = self.w.serving_endpoints.query(name=EMBED_ENDPOINT, input=[text])
         return resp.data[0].embedding
 
-    def retrieve(self, question: str, k: int = 4, topic: str | None = None) -> list[dict]:
+    def retrieve(
+        self,
+        question: str,
+        k: int = 4,
+        topic: str | None = None,
+        vector: list[float] | None = None,
+    ) -> list[dict]:
+        # Callers that already embedded the question (the app) pass `vector`
+        # so the embedding endpoint isn't called twice.
         kwargs = dict(
             index_name=INDEX,
             columns=RETRIEVE_COLS,
-            query_vector=self.embed(question),
+            query_vector=vector if vector is not None else self.embed(question),
             num_results=k,
         )
         if topic:
@@ -98,8 +106,12 @@ class RagAgent:
         topic: str | None = None,
         system: str = ANSWER_PROMPT,
         max_tokens: int = 400,
+        hits: list[dict] | None = None,
     ) -> dict:
-        hits = self.retrieve(question, k=k, topic=topic)
+        # Callers that already retrieved the passages (the app, which shows the
+        # search step) pass `hits` so the index isn't queried twice.
+        if hits is None:
+            hits = self.retrieve(question, k=k, topic=topic)
         if not hits:
             return {"answer": "No relevant passages were found in the index.", "sources": []}
         context = "\n\n".join(

@@ -1,25 +1,38 @@
 """Gold: curated RAG-ready chunks (materialized view).
 
-Materialized view over the silver_chunks streaming table. All expensive,
-non-deterministic work (ai_prep_search + the ai_query embedding call) already
-happened incrementally upstream in silver_chunks — embedded once per document.
+Valid chunks from silver_chunks joined on doc_id with the topic and sentiment
+from silver_documents. All the model calls (parse, classify, sentiment, chunk,
+embed) already happened upstream, each in its own materialized view.
 
-What makes this MV cheap is simply that NO AI functions run in it — refreshing
-it can never re-invoke an LLM or re-embed anything (a separate property from
-whether the projection refreshes incrementally). That is the whole reason gold
-can be an MV: put the AI calls in an MV and every refresh would fully recompute
-and re-embed every chunk. Here the MV only does deterministic curation — it
-selects the serving columns.
+Gold calls no AI functions, so it keeps the default refresh policy: SDP
+refreshes it incrementally on serverless (APPEND_ONLY for a new document,
+ROW_BASED after a re-classification), and if it ever falls back to a full
+recompute, that only re-joins columns that already exist. Check the technique in
+the event log:
+
+    SELECT timestamp, message
+    FROM event_log(TABLE(<catalog>.<schema>.gold_rag_chunks))
+    WHERE event_type = 'planning_information'
+    ORDER BY timestamp DESC
+
+Gold also filters out chunks that silver_chunks flagged (empty text or a bad
+embedding). That filter loses nothing: the flagged rows stay in silver_chunks.
 
 A self-managed-embeddings Delta Sync index (resources/ai_sdp.vector_search.yml)
 sources directly from this MV, so the index syncs the precomputed `embedding`
-with no manual push step. That needs the "AI Search on materialized views"
-preview on the workspace (ask your Databricks account team) plus the two table
-properties below, which give the MV a readable change data feed.
+with no manual push step. An MV source needs external metadata (Smart Clone)
+enabled, set by the table properties below (external data access for pipeline
+tables is in Public Preview).
 """
 
 from pyspark import pipelines as dp
-from pyspark.sql import functions as F
+
+# Same conditions as the has_text and embedding_ok expectations on silver_chunks.
+VALID_CHUNK = (
+    "coalesce(length(trim(chunk_to_retrieve)), 0) > 0 "
+    "AND coalesce(length(trim(chunk_to_embed)), 0) > 0 "
+    "AND embedding IS NOT NULL AND size(embedding) = 1024"
+)
 
 
 @dp.materialized_view(
@@ -37,20 +50,26 @@ from pyspark.sql import functions as F
         # OPERATION: CHANGE DATA FEED not supported on Materialized Views.
         # Scoped to this MV (the index source) rather than the whole pipeline.
         "pipelines.externalMetadata.enabled": "true",
-        # Vector Search index-creation validation also requires the standard CDF
-        # property on the source ("... not a valid Vector Search source. Please
-        # retry after enabling change data feed"). external-metadata provides the
-        # readable CDF; this flag makes VS accept the MV as a Delta Sync source.
+        # The AI Search docs say row-tracked sources (including MVs with external
+        # metadata) use change data feed automatically, so this looks redundant.
+        # In practice index creation on this MV was rejected without it ("... not
+        # a valid Vector Search source. Please retry after enabling change data
+        # feed"), so it stays as belt-and-braces until that validation changes.
         "delta.enableChangeDataFeed": "true",
     },
 )
 def gold_rag_chunks():
+    # Document-level enrichment, joined onto each chunk. Kept out of
+    # silver_chunks so re-classifying (a full refresh of silver_documents)
+    # never re-embeds.
+    enrichment = spark.read.table("silver_documents").select("doc_id", "topic", "sentiment")
     return (
         spark.read.table("silver_chunks")
-        # Deterministic curation only — no AI functions here, so the MV refresh
-        # is cheap and never re-embeds. Empty text and bad embeddings are already
-        # dropped by expectations on silver_chunks; this filter is defense-in-depth.
-        .where(F.length(F.trim(F.col("chunk_to_retrieve"))) > 0)
+        # Deterministic curation only, no AI functions, so a refresh never
+        # re-embeds. Serve only the chunks silver_chunks' expectations passed;
+        # the flagged ones stay in silver_chunks for inspection.
+        .where(VALID_CHUNK)
+        .join(enrichment, "doc_id")
         .select(
             "doc_id",
             "chunk_id",

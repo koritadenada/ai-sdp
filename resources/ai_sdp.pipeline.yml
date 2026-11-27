@@ -6,8 +6,13 @@ resources:
       catalog: ${var.catalog}
       schema: ${var.schema}
       serverless: true
-      # PREVIEW channel → latest serverless runtime, required for
-      # ai_parse_document (DBR 17.3+) and ai_prep_search (DBR 18.2+ / env v3).
+      # Runtime requirements: ai_parse_document needs DBR 17.3 LTS+, and
+      # ai_prep_search needs DBR 18.2+ on serverless environment version 3+.
+      # DBR 18.2 reached end of support on 5 Nov 2026 and the Runtime 18 release
+      # notes list no later 18.x, so don't rely on DBR 18. Channels map to
+      # runtimes and the mapping moves (as of Nov 2026: CURRENT = DBR 18,
+      # PREVIEW = DBR 19). The demo was built and tested on PREVIEW; check the
+      # runtime in the pipeline event log (runtime_details) before switching.
       channel: PREVIEW
       root_path: "../"
       # Pass config through to the pipeline code (read via spark.conf.get).

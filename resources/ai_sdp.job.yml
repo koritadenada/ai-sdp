@@ -1,14 +1,16 @@
 # Lakeflow Job that runs the ai_sdp_rag pipeline whenever new source documents
-# land in the raw volume. File-arrival triggers are a Jobs feature (not available
-# on a standalone pipeline), so the pipeline is wrapped in a single-task job here.
+# land in the raw volume, then syncs the AI Search index. File-arrival triggers
+# are a Jobs feature (not available on a standalone pipeline), so the pipeline
+# is wrapped in a job here.
 resources:
   jobs:
     ai_sdp_ingest:
       name: ai_sdp_ingest
       # Fire when new files appear under the raw documents folder. The trigger
-      # polls the location (~every minute) and starts a run on newly-arrived
-      # files; files already present when the trigger is created form the
-      # baseline and do not fire it.
+      # checks the location about once a minute on a best-effort basis and
+      # starts a run for NEW files only: overwriting an existing file with the
+      # same name does not fire it. Files already present when the trigger is
+      # created form the baseline and do not fire it either.
       trigger:
         # `mode: development` pauses triggers by default; force it on so the
         # file-arrival demo works on the dev target too.
@@ -19,3 +21,23 @@ resources:
         - task_key: run_pipeline
           pipeline_task:
             pipeline_id: ${resources.pipelines.ai_sdp_rag.id}
+
+        # The index is TRIGGERED, so it only picks up new gold rows when asked.
+        # There is no dedicated "sync index" task type, so this Python task
+        # calls the sync API and waits until the index has caught up with gold.
+        # New documents are searchable once this task succeeds.
+        - task_key: sync_index
+          depends_on:
+            - task_key: run_pipeline
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/jobs/sync_index.py
+            parameters:
+              - ${var.catalog}.${var.schema}.gold_rag_chunks_index
+              - ${var.catalog}.${var.schema}.gold_rag_chunks
+
+      environments:
+        - environment_key: default
+          spec:
+            # databricks-sdk ships with the serverless environment.
+            environment_version: "3"

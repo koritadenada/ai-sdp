@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Document RAG in one Lakeflow pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --lava:#FF3621; --navy:#1B3139; --muted:#5A6B72; --line:#E2E6EA; --line2:#CDD5DB;
+    --wash:#F5F7F9; --card:#FFFFFF; --uc:#2272B4; --green:#00A06B;
+    --bronze:#A4613A; --silver:#5F6F7B; --gold:#C99A2E; --mv:#C99A2E;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:#fff; color:var(--navy);
+    font-family:"DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  #stage { position:relative; width:1600px; height:900px; background:#fff; overflow:hidden; }
+  .abs { position:absolute; }
+
+  /* header */
+  .hdr { left:48px; top:34px; display:flex; align-items:center; gap:14px; }
+  .hdr h1 { margin:0; font-size:30px; font-weight:700; letter-spacing:-.015em; }
+  .sub { left:48px; top:82px; font-size:16px; color:var(--muted); }
+  .sub b { color:var(--navy); font-weight:700; }
+
+  /* generic cards */
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+          box-shadow:0 2px 10px rgba(27,49,57,.06); }
+  .svc { display:flex; align-items:center; gap:12px; padding:14px 18px; }
+  .svc img { width:30px; height:30px; }
+  .svc .t { font-size:16px; font-weight:700; }
+  .svc .d { font-size:13px; color:var(--muted); margin-top:2px; }
+  .svc.fm { border-color:#F7C2BB; background:#FFF6F4; }
+
+  /* pipeline frame */
+  .pipe { left:268px; top:236px; width:1290px; height:338px; border:1px solid var(--line); border-radius:18px; background:var(--wash); }
+  .pipe .lbl { position:absolute; left:22px; top:14px; display:flex; align-items:center; gap:9px; font-size:15px; font-weight:700; }
+  .pipe .lbl img { width:22px; height:22px; }
+  .pipe .tag { position:absolute; right:22px; top:16px; font-size:13px; color:var(--muted); }
+
+  /* table cards */
+  .tbl { width:228px; background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden;
+         box-shadow:0 2px 8px rgba(27,49,57,.05); }
+  .tbl .bar { display:flex; justify-content:space-between; align-items:center; padding:7px 12px; color:#fff;
+              font-size:11.5px; font-weight:700; letter-spacing:.08em; }
+  .tbl .bar span:last-child { font-size:9.5px; letter-spacing:.06em; background:rgba(255,255,255,.18);
+              padding:2px 7px; border-radius:5px; }
+  .tbl .b { padding:10px 12px 12px; }
+  .tbl .n { font-family:"DM Mono",ui-monospace,Menlo,monospace; font-size:15px; font-weight:500; }
+  .tbl .d { font-size:12.5px; color:var(--muted); margin:3px 0 8px; }
+  .bronze .bar { background:var(--bronze); }
+  .silver .bar { background:var(--silver); }
+  .gold   .bar { background:var(--gold); }
+  .gold { border:2px solid var(--gold); }
+
+  .chip { display:inline-block; font-family:"DM Mono",ui-monospace,Menlo,monospace; font-size:11.5px; padding:3px 8px;
+          border-radius:6px; margin:0 4px 4px 0; }
+  .ai   { color:#C6311E; background:#FFEDEA; border:1px solid #FBC9C1; }
+  .noai { color:#0B7A55; background:#E8F7F1; border:1px solid #BCE6D4; }
+
+  /* source */
+  .src { left:44px; top:330px; width:196px; }
+  .src .bar { background:var(--navy); }
+  .ft { display:inline-block; font-size:11px; font-weight:700; border:1px solid var(--line2); border-radius:6px;
+        padding:3px 7px; margin-right:4px; color:var(--navy); }
+
+  /* AI Search */
+  .idx { left:1310px; top:640px; width:248px; border:2px solid var(--lava); border-radius:12px; background:#fff; overflow:hidden; }
+  .idx .bar { background:var(--lava); color:#fff; font-size:11.5px; font-weight:700; letter-spacing:.08em; padding:7px 12px;
+              display:flex; align-items:center; gap:8px; }
+  .idx .bar img { width:16px; height:16px; filter:brightness(0) invert(1); }
+  .idx .b { padding:10px 12px 12px; }
+  .idx .n { font-family:"DM Mono",ui-monospace,Menlo,monospace; font-size:14.5px; font-weight:500; }
+  .idx .d { font-size:12.5px; color:var(--muted); margin:3px 0 8px; }
+  .idx .chip { color:#C6311E; background:#FFEDEA; border:1px solid #FBC9C1; }
+
+  /* consumers */
+  .cons { left:44px; top:640px; width:1236px; height:150px; border:1px solid #EFE3D3; background:#FCF8F2; border-radius:16px; }
+  .cons .rl { position:absolute; left:22px; font-size:12px; font-weight:700; letter-spacing:.1em; color:var(--muted); }
+  .cons .it { position:absolute; width:300px; height:48px; display:flex; align-items:center; gap:12px; padding:0 16px;
+              background:#fff; border:1px solid #EFE3D3; border-radius:10px; font-size:15px; font-weight:700; }
+  .cons .it img { width:26px; height:26px; }
+
+  /* UC bar */
+  .uc { left:44px; top:816px; width:1514px; height:56px; background:var(--navy); border-radius:12px; color:#fff;
+        display:flex; align-items:center; gap:14px; padding:0 20px; }
+  .uc img { width:26px; height:26px; }
+  .uc .t { font-size:17px; font-weight:700; }
+  .uc .d { font-size:14px; color:#C9D3D8; }
+  .uc .pill { margin-left:auto; background:var(--lava); color:#fff; font-size:12.5px; font-weight:700; letter-spacing:.06em;
+              padding:8px 14px; border-radius:999px; }
+
+  svg.wires { position:absolute; inset:0; pointer-events:none; }
+  .wlabel { position:absolute; font-size:12px; color:var(--muted); background:#fff; border:1px solid var(--line);
+            padding:2px 8px; border-radius:6px; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- header -->
+  <div class="abs hdr">
+    <svg width="34" height="37" viewBox="0 0 300 331" xmlns="http://www.w3.org/2000/svg"><path d="M283.923 136.449L150.144 213.624L6.88995 131.168L0 134.982V194.844L150.144 281.115L283.923 204.234V235.926L150.144 313.1L6.88995 230.644L0 234.458V244.729L150.144 331L300 244.729V184.867L293.11 181.052L150.144 263.215L16.0766 186.334V154.643L150.144 231.524L300 145.253V86.2713L292.536 81.8697L150.144 163.739L22.9665 90.9663L150.144 17.8998L254.641 78.055L263.828 72.773V65.4371L150.144 0L0 86.2713V95.6613L150.144 181.933L283.923 104.758V136.449Z" fill="#FF3621"/></svg>
+    <h1>Document RAG in one Lakeflow pipeline</h1>
+  </div>
+  <div class="abs sub">Raw files in, governed AI Search index out. <b>AI Functions run in materialized views</b> that refresh incrementally, so each document is processed once.</div>
+
+  <!-- job + foundation models -->
+  <div class="abs card svc" style="left:268px; top:128px; width:430px;">
+    <img src="icons/p_lakeflow-jobs.svg" alt="">
+    <div><div class="t">Lakeflow Job</div><div class="d">file-arrival trigger runs the pipeline, then syncs the index</div></div>
+  </div>
+  <div class="abs card svc fm" style="left:842px; top:128px; width:470px;">
+    <img src="icons/p_mosaic-ai.svg" alt="">
+    <div><div class="t">Foundation Model APIs</div><div class="d">the serverless models behind every AI function</div></div>
+  </div>
+
+  <!-- source -->
+  <div class="abs tbl src">
+    <div class="bar"><span>SOURCE</span><span>UC VOLUME</span></div>
+    <div class="b">
+      <div class="n" style="font-family:inherit;font-weight:700;">Unity Catalog volume</div>
+      <div class="d">raw documents</div>
+      <span class="ft">PDF</span><span class="ft">DOCX</span><span class="ft">PNG</span>
+    </div>
+  </div>
+
+  <!-- pipeline -->
+  <div class="abs pipe">
+    <div class="lbl"><img src="icons/p_lakeflow-pipelines.svg" alt="">Lakeflow Spark Declarative Pipeline</div>
+    <div class="tag">serverless</div>
+  </div>
+
+  <div class="abs tbl bronze" style="left:292px; top:330px;">
+    <div class="bar"><span>BRONZE</span><span>STREAMING TABLE</span></div>
+    <div class="b"><div class="n">bronze_documents</div><div class="d">Auto Loader, raw bytes</div>
+      <span class="chip noai">no AI calls</span></div>
+  </div>
+
+  <div class="abs tbl silver" style="left:560px; top:330px;">
+    <div class="bar"><span>SILVER</span><span>MATERIALIZED VIEW</span></div>
+    <div class="b"><div class="n">silver_parsed</div><div class="d">parse once, flag is_valid</div>
+      <span class="chip ai">ai_parse_document</span></div>
+  </div>
+
+  <div class="abs tbl silver" style="left:828px; top:278px;">
+    <div class="bar"><span>SILVER</span><span>MATERIALIZED VIEW</span></div>
+    <div class="b"><div class="n">silver_documents</div><div class="d">classify and score</div>
+      <span class="chip ai">ai_classify</span><span class="chip ai">ai_analyze_sentiment</span></div>
+  </div>
+
+  <div class="abs tbl silver" style="left:828px; top:440px; width:200px;">
+    <div class="bar"><span>SILVER</span><span>MV</span></div>
+    <div class="b"><div class="n">silver_chunk_prep</div><div class="d">chunk</div>
+      <span class="chip ai">ai_prep_search</span></div>
+  </div>
+
+  <div class="abs tbl silver" style="left:1060px; top:440px; width:214px;">
+    <div class="bar"><span>SILVER</span><span>MV</span></div>
+    <div class="b"><div class="n">silver_chunks</div><div class="d">one row per chunk, embed</div>
+      <span class="chip ai">ai_query · gte-large-en</span></div>
+  </div>
+
+  <div class="abs tbl gold" style="left:1306px; top:330px; width:228px;">
+    <div class="bar"><span>GOLD</span><span>MATERIALIZED VIEW</span></div>
+    <div class="b"><div class="n">gold_rag_chunks</div><div class="d">join, ready to serve</div>
+      <span class="chip noai">no AI calls</span></div>
+  </div>
+
+  <!-- consumers -->
+  <div class="abs cons">
+    <div class="rl" style="top:30px;">QUERY THE TABLE</div>
+    <div class="rl" style="top:96px;">RETRIEVE BY MEANING</div>
+    <div class="it" style="left:250px; top:14px;"><img src="icons/p_genie.svg" alt="">Genie</div>
+    <div class="it" style="left:566px; top:14px;"><img src="icons/p_ai-bi-dashboards.svg" alt="">AI/BI Dashboards</div>
+    <div class="it" style="left:882px; top:14px;"><img src="icons/p_databricks-sql.svg" alt="">Databricks SQL</div>
+    <div class="it" style="left:250px; top:82px;"><img src="icons/p_apps.svg" alt="">RAG agent on Apps</div>
+    <div class="it" style="left:566px; top:82px;"><img src="icons/p_agent-bricks.svg" alt="">Agent Bricks</div>
+    <div class="it" style="left:882px; top:82px;"><img src="icons/a_model_serving.svg" alt="">Model Serving</div>
+  </div>
+
+  <!-- AI Search -->
+  <div class="abs idx">
+    <div class="bar"><img src="icons/a_vector_search.svg" alt="">AI SEARCH INDEX</div>
+    <div class="b"><div class="n">gold_rag_chunks_index</div><div class="d">Delta Sync from gold, synced by the job</div>
+      <span class="chip">query by vector · 1024-dim</span></div>
+  </div>
+
+  <!-- Unity Catalog -->
+  <div class="abs uc">
+    <img src="icons/p_unity-catalog.svg" alt="">
+    <span class="t">Unity Catalog</span>
+    <span class="d">Volume, tables and index in one schema. One set of permissions, one lineage graph.</span>
+    <span class="pill">ONE BUNDLE DEPLOYS IT ALL</span>
+  </div>
+
+  <!-- wires -->
+  <svg class="wires" viewBox="0 0 1600 900">
+    <defs>
+      <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#1B3139"/></marker>
+      <marker id="arL" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#FF3621"/></marker>
+      <marker id="arG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#8A97A5"/></marker>
+    </defs>
+    <g fill="none" stroke-width="2">
+      <!-- source -> bronze -->
+      <path d="M240 392 H288" stroke="#1B3139" marker-end="url(#ar)"/>
+      <!-- bronze -> silver_parsed -->
+      <path d="M520 392 H556" stroke="#1B3139" marker-end="url(#ar)"/>
+      <!-- silver_parsed -> silver_documents / silver_chunk_prep -->
+      <path d="M788 378 C808 378 806 334 824 334" stroke="#1B3139" marker-end="url(#ar)"/>
+      <path d="M788 408 C808 408 806 496 824 496" stroke="#1B3139" marker-end="url(#ar)"/>
+      <!-- prep -> chunks -->
+      <path d="M1028 496 H1056" stroke="#1B3139" marker-end="url(#ar)"/>
+      <!-- silver_documents -> gold, silver_chunks -> gold -->
+      <path d="M1056 334 C1180 334 1200 372 1302 372" stroke="#1B3139" marker-end="url(#ar)"/>
+      <path d="M1274 496 C1290 496 1288 420 1302 420" stroke="#1B3139" marker-end="url(#ar)"/>
+      <!-- job -> pipeline (dashed) -->
+      <path d="M483 199 V232" stroke="#8A97A5" stroke-dasharray="5 5" marker-end="url(#arG)"/>
+      <!-- source -> job (new files, dashed) -->
+      <path d="M142 330 V164 H262" stroke="#8A97A5" stroke-dasharray="5 5" marker-end="url(#arG)"/>
+      <!-- foundation models -> AI MVs (dotted lava) -->
+      <path d="M940 199 V274" stroke="#FF3621" stroke-dasharray="3 5" marker-end="url(#arL)"/>
+      <path d="M1170 199 V436" stroke="#FF3621" stroke-dasharray="3 5" marker-end="url(#arL)"/>
+      <path d="M870 199 V216 H700 V326" stroke="#FF3621" stroke-dasharray="3 5" marker-end="url(#arL)"/>
+      <!-- gold -> index -->
+      <path d="M1434 492 V636" stroke="#C99A2E" marker-end="url(#ar)"/>
+      <!-- gold -> consumers (query the table) -->
+      <path d="M1360 492 V600 H1200 V636" stroke="#8A97A5" marker-end="url(#arG)"/>
+      <!-- index -> retrieve row -->
+      <path d="M1310 745 H1286" stroke="#FF3621" marker-end="url(#arL)"/>
+    </g>
+  </svg>
+  <div class="wlabel" style="left:100px; top:228px;">new files</div>
+  <div class="wlabel" style="left:1446px; top:596px;">Delta Sync</div>
+  <div class="wlabel" style="left:1208px; top:586px;">SQL</div>
+
+</div>
+</body>
+</html>

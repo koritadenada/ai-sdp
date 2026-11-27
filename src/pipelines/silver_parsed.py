@@ -1,28 +1,28 @@
-"""Silver parsed: parse every document once and flag whether it is usable.
+"""Silver parsed: parse every document and flag whether it is usable.
 
-Reads the bronze binary stream and:
+Materialized view over bronze_documents that:
   1. ai_parse_document(content) → structured VARIANT (pages, elements)
   2. flattens the parsed elements into a single `body` text string
   3. records `error_status` (NULL when the parse succeeded) and `char_count`
   4. computes `is_valid` (no parse error AND some text); never NULL
 
-Parsing is the most expensive step, so it lives in its own streaming table and
-runs exactly once per file. Nothing is dropped here: every file is kept with its
-validity flag. silver_documents enriches valid rows only (no AI call ever sees a
-bad row), and failed parses stay right here with is_valid = false, so a
-streaming table never silently loses a document. To list the files to fix and
-re-upload (error_status set = parse error; NULL with char_count 0 = no text,
-e.g. a scan with no readable content):
+AI functions run in materialized views throughout this pipeline. On serverless,
+SDP refreshes these MVs incrementally: when a new file lands in bronze, only that
+row is parsed (the event log reports APPEND_ONLY). `refresh_policy =
+"incremental_strict"` makes that a requirement: if SDP ever cannot refresh this
+MV incrementally, the update FAILS instead of silently re-parsing the corpus.
+
+Nothing is dropped here: every file is kept with its validity flag, and the
+expectation counts the failures. List the files to fix and re-upload with:
 
     SELECT _source_file, error_status, char_count
     FROM silver_parsed WHERE NOT is_valid
 
-Keeping parsing separate from enrichment also means changing the enrichment
-(topic labels, sentiment) only refreshes silver_documents; documents are never
-re-parsed for it.
+silver_documents and silver_chunk_prep both read the valid rows of this table,
+side by side, so changing the enrichment never re-parses or re-chunks anything.
 
-ai_parse_document requires DBR 17.3+ on serverless (pinned in the pipeline
-resource) and must run in a Foundation Model API region.
+ai_parse_document requires DBR 17.3+ on serverless and must run in a Foundation
+Model API region.
 """
 
 from pyspark import pipelines as dp
@@ -39,9 +39,10 @@ ERROR_STATUS = "nullif(to_json(parsed:error_status), 'null')"
 IS_VALID = "error_status IS NULL AND char_count > 0"
 
 
-@dp.table(
+@dp.materialized_view(
     name="silver_parsed",
     comment="Every ingested document parsed once (ai_parse_document), with an is_valid flag.",
+    refresh_policy="incremental_strict",
     table_properties={
         "delta.autoOptimize.optimizeWrite": "true",
         "delta.autoOptimize.autoCompact": "true",
@@ -52,7 +53,7 @@ IS_VALID = "error_status IS NULL AND char_count > 0"
 @dp.expect("is_valid", "is_valid")
 def silver_parsed():
     return (
-        spark.readStream.table("bronze_documents")
+        spark.read.table("bronze_documents")
         # 1. Parse the binary document into a structured VARIANT.
         .withColumn("parsed", F.expr("ai_parse_document(content)"))
         # 2. Flatten parsed elements into one text body, normalizing whitespace.
@@ -61,9 +62,7 @@ def silver_parsed():
             F.trim(
                 F.regexp_replace(
                     F.expr(
-                        "concat_ws('\\n', "
-                        "transform(parsed:document:elements::ARRAY<VARIANT>, "
-                        "e -> e:content::STRING))"
+                        "concat_ws('\\n', transform(parsed:document:elements::ARRAY<VARIANT>, e -> e:content::STRING))"
                     ),
                     r"\s+",
                     " ",
@@ -78,9 +77,7 @@ def silver_parsed():
             "doc_id",
             F.concat_ws(
                 "_",
-                F.regexp_replace(
-                    F.regexp_extract(F.col("_source_file"), r"([^/]+)$", 1), r"\.[^.]+$", ""
-                ),
+                F.regexp_replace(F.regexp_extract(F.col("_source_file"), r"([^/]+)$", 1), r"\.[^.]+$", ""),
                 F.substring(F.sha2(F.col("_source_file"), 256), 1, 8),
             ),
         )
@@ -92,9 +89,8 @@ def silver_parsed():
         .select(
             "doc_id",
             "body",
-            # Carried forward so silver_chunks can run ai_prep_search on the raw
-            # ai_parse_document VARIANT (its schema is document.elements[]; note
-            # ai_prep_search downstream emits a *different* shape, document.contents[]).
+            # Carried forward so silver_chunk_prep can run ai_prep_search on the
+            # raw ai_parse_document VARIANT (its schema is document.elements[]).
             "parsed",
             "error_status",
             "char_count",

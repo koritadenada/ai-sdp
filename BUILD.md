@@ -145,7 +145,7 @@ There is no streaming-table fallback in this design: every table the index could
 
 ## Layout, deployment and validation
 
-See the README for the repository layout and the end-to-end deploy commands,
+See the README for the deploy commands,
 and `docs/reproducibility.md` for workspace prerequisites, fallbacks and
 troubleshooting.
 

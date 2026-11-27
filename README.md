@@ -2,8 +2,8 @@
 
 A **Lakeflow Spark Declarative Pipeline (SDP)** that turns raw documents (PDF,
 DOCX, PNG) into a searchable, governed RAG index, with every AI step running
-inline as an AI function. A Streamlit **Databricks App** ("AI in SDP Agent")
-answers questions over the index.
+inline as an AI function. A small RAG agent (`src/agents/rag_agent.py`)
+answers questions over the index from the command line.
 
 Built with the `pyspark.pipelines` API on **serverless** compute and deployed
 with a Declarative Automation Bundle (formerly Databricks Asset Bundles).
@@ -11,47 +11,6 @@ with a Declarative Automation Bundle (formerly Databricks Asset Bundles).
 ![Architecture](docs/ai_sdp_architecture.png)
 
 ## How it works
-
-```
-raw document files (PDF/DOCX/PNG) in a UC volume
-        │  Auto Loader (cloudFiles, binaryFile); file-arrival job trigger
-        ▼
-┌──────────────────┐
-│ bronze_documents │  raw binary ingest + provenance; no AI calls
-│  (streaming tbl) │  the only streaming table
-└──────────────────┘
-        ▼
-┌──────────────────┐
-│ silver_parsed    │  ai_parse_document → text
-│  (MV, STRICT)    │  error_status · char_count · is_valid (failures kept, flagged)
-└──────────────────┘
-        │  WHERE is_valid (filtered BEFORE any AI call), feeds both branches
-        ├───────────────────────────────┐
-        ▼                               ▼
-┌──────────────────┐          ┌───────────────────┐
-│ silver_documents │          │ silver_chunk_prep │  ai_prep_search → chunks (stored)
-│  (MV, STRICT)    │          │  (MV, STRICT)     │
-└──────────────────┘          └───────────────────┘
-  ai_analyze_sentiment                  ▼
-  ai_classify (v2.1)          ┌───────────────────┐
-        │                     │ silver_chunks     │  posexplode the stored chunks,
-        │                     │  (MV, STRICT)     │  ai_query(gte-large-en) → embedding
-        │                     └───────────────────┘
-        └───────────────┬───────────────┘
-                        ▼  join on doc_id
-              ┌──────────────────┐
-              │ gold_rag_chunks  │  chunks + topic/sentiment, valid chunks only;
-              │  (MV)            │  no AI functions
-              └──────────────────┘
-        │  Delta Sync, self-managed embeddings
-        ▼
-┌────────────────────────┐
-│ gold_rag_chunks_index  │  AI Search (formerly Vector Search) index
-└────────────────────────┘
-        │
-        ▼
-  AI in SDP Agent (Databricks App): embed question → query index → answer with an LLM
-```
 
 **AI Functions in materialized views:** every model call (parse, classify,
 sentiment, chunk, embed) runs in a materialized view. On serverless, SDP
@@ -126,10 +85,7 @@ ai-sdp/
 │   │   └── gold_rag_chunks.py
 │   ├── sql_pipeline/              # The same six tables in SQL (not deployed by default)
 │   ├── jobs/sync_index.py         # Job task: sync the AI Search index and wait
-│   ├── agents/rag_agent.py        # RAG agent, usable as a CLI
-│   └── app/                       # Databricks App (Streamlit)
-│       ├── app.py, app.yaml, requirements.txt, databricks_logo.svg
-│       └── rag_agent.py           # identical copy of src/agents/rag_agent.py
+│   └── agents/rag_agent.py        # RAG agent, usable as a CLI
 ├── data_generation/
 │   ├── generate_documents.py      # 10 base docs + 3 "later" docs (PDF/DOCX/PNG)
 │   └── seed.sh                    # schema + volume + upload of the base docs
@@ -208,37 +164,9 @@ WHERE event_type = 'planning_information'
 ORDER BY timestamp DESC;
 ```
 
-### Deploy the app
+### Ask the index a question
 
-The app is deployed with the Apps CLI (it is not part of the bundle).
-
-```bash
-P=<your-profile>
-ME=$(databricks current-user me --profile $P -o json | python3 -c "import sys,json;print(json.load(sys.stdin)['userName'])")
-
-# 1. Point the app at your index: edit RAG_INDEX in src/app/app.yaml
-#    (default: ai_sdp_catalog.rag_dev.gold_rag_chunks_index).
-
-# 2. Create the app, upload the code, deploy.
-databricks apps create ai-sdp-rag --profile $P
-databricks sync src/app /Workspace/Users/$ME/apps/ai-sdp-rag --full --profile $P
-databricks apps deploy ai-sdp-rag \
-  --source-code-path /Workspace/Users/$ME/apps/ai-sdp-rag --profile $P
-
-# 3. Let the app's service principal read the index and use the endpoint.
-SP=$(databricks apps get ai-sdp-rag --profile $P -o json | python3 -c "import sys,json;print(json.load(sys.stdin)['service_principal_client_id'])")
-databricks grants update catalog ai_sdp_catalog --profile $P \
-  --json "{\"changes\":[{\"principal\":\"$SP\",\"add\":[\"USE_CATALOG\"]}]}"
-databricks grants update schema ai_sdp_catalog.rag_dev --profile $P \
-  --json "{\"changes\":[{\"principal\":\"$SP\",\"add\":[\"USE_SCHEMA\",\"SELECT\"]}]}"
-EP=$(databricks vector-search-endpoints get-endpoint ai-sdp-vs-dev --profile $P -o json | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])")
-databricks permissions update vector-search-endpoints $EP --profile $P \
-  --json "{\"access_control_list\":[{\"service_principal_name\":\"$SP\",\"permission_level\":\"CAN_USE\"}]}"
-```
-
-Set `RAG_UI_ONLY=true` in `app.yaml` to preview the UI without an index.
-
-The agent also runs from the command line:
+Query the index with the RAG agent from the command line:
 
 ```bash
 RAG_INDEX=ai_sdp_catalog.rag_dev.gold_rag_chunks_index \

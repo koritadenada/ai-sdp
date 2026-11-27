@@ -1,7 +1,6 @@
 ai-sdp
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
-The Databricks name, logo and product icons (src/app/databricks_logo.svg and
-the files in docs/icons/) are trademarks of Databricks, Inc. They are included
-only to illustrate the architecture diagram and the demo app, and are not
-covered by the Apache License.
+The Databricks name, logo and product icons (the files in docs/icons/) are
+trademarks of Databricks, Inc. They are included only to illustrate the
+architecture diagrams, and are not covered by the Apache License.

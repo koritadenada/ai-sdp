@@ -47,15 +47,15 @@ tables.
 
 ### 3. Permissions
 
-The deploying user needs to create pipelines, jobs, AI Search endpoints and
-apps, and needs `USE CATALOG`, `CREATE SCHEMA` (for `seed.sh`) and write access
+The deploying user needs to create pipelines, jobs and AI Search endpoints, and
+needs `USE CATALOG`, `CREATE SCHEMA` (for `seed.sh`) and write access
 on the target catalog. If you can't use the default `ai_sdp_catalog`, pass
 `--var catalog=<your_catalog>` or add a target in a `*.local.yml` file (see
 `example.local.yml.example`).
 
-The app runs as its own service principal, which needs `USE CATALOG`,
-`USE SCHEMA` + `SELECT` on the schema and `CAN_USE` on the AI Search endpoint
-(see "Deploy the app" in the README). Foundation Model API pay-per-token
+To query the index (for example with `src/agents/rag_agent.py`), a user or
+service principal needs `USE CATALOG`, `USE SCHEMA` + `SELECT` on the schema and
+`CAN_USE` on the AI Search endpoint. Foundation Model API pay-per-token
 endpoints are usable by default.
 
 ## Troubleshooting
@@ -70,8 +70,6 @@ endpoints are usable by default.
 | The `sync_index` task fails with `AI Search endpoint ... is stopped` | The endpoint was stopped (for example by an idle policy); the index and its data are kept | Start the endpoint (`databricks api post /api/2.0/vector-search/endpoints/<name>/start`), wait until the index is `ONLINE`, and re-run the job |
 | An update fails with `INCREMENTAL_REFRESH_UNAVAILABLE_WITH_STRICT_REFRESH_POLICY` | You changed the query of an AI MV (labels, prompt, model), which can't be applied incrementally | Full-refresh just that MV (see "Refresh policy and full refreshes") |
 | An edited document isn't updated | The file-arrival trigger fires for new files only | Upload the new version under a new file name |
-| App answers with `Error: ... PERMISSION_DENIED` | The app's service principal lacks grants | Re-run the grants in "Deploy the app" |
-| App crashes with `unexpected keyword argument 'icon'` | Old Streamlit in the Apps runtime | Keep `streamlit>=1.40` in `src/app/requirements.txt` |
 
 ## Refresh policy and full refreshes
 

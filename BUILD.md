@@ -82,16 +82,7 @@ Rationale:
 - **No unnecessary compute**: The trigger checks the volume about once a minute on a best-effort basis and starts a run only for new files (overwriting a file with the same name does not fire it).
 - **Baseline isolation**: Files present when the trigger is created do not fire it (already ingested).
 
-### 7. Databricks App for User Interface
-
-Decision: Serve the RAG agent via a Databricks App (Streamlit-based).
-
-Rationale:
-- **No extra infrastructure**: The app embeds the question with the same model the pipeline used, queries the AI Search index through the Databricks SDK, and calls a Foundation Model API chat endpoint. No separate vector database or API layer.
-- **Auth**: Users sign in with workspace SSO; the app reads the index as its own service principal, governed by Unity Catalog grants.
-- **Deployment**: Deployed with the Apps CLI from `src/app/` (see the README).
-
-### 8. Semantic Chunking via ai_prep_search
+### 7. Semantic Chunking via ai_prep_search
 
 Decision: Use `ai_prep_search` for chunking instead of fixed-character or regex patterns.
 
@@ -121,7 +112,7 @@ gold_rag_chunks (materialized view, deterministic curation)
   ↓
 AI Search index (Delta Sync, syncs the precomputed embeddings)
   ↓
-RAG Agent (Databricks App, queries index + calls LLM endpoint)
+RAG agent (src/agents/rag_agent.py: embeds the question, queries the index, calls an LLM endpoint)
   ↓
 User questions answered with cited sources
 ```

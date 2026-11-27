@@ -5,13 +5,11 @@ so a query is two steps: embed the question with the same model the pipeline
 used (databricks-gte-large-en), then query the index by vector. Passing the raw
 1024-dim vector through the SDK avoids the JSON truncation the CLI hits.
 
-This file exists twice, byte for byte: src/agents/rag_agent.py (CLI) and
-src/app/rag_agent.py (imported by the Databricks App, which only deploys its own
-folder). Edit one, then copy it over the other.
+Use it as a CLI (below) or import RagAgent into your own app or job.
 
-Auth: WorkspaceClient() uses the ambient Databricks SDK config. In a deployed
-App that is the app's service principal; locally it honors
-DATABRICKS_CONFIG_PROFILE (or pass --profile on the CLI).
+Auth: WorkspaceClient() uses the ambient Databricks SDK config: locally it
+honors DATABRICKS_CONFIG_PROFILE (or pass --profile on the CLI); inside a
+Databricks App or job it uses that resource's service principal.
 
 Config (env vars):
     RAG_INDEX           <catalog>.<schema>.gold_rag_chunks_index
@@ -66,8 +64,8 @@ def _scalar(value: dict):
 
 class RagAgent:
     def __init__(self, profile: str | None = None):
-        # profile=None uses the ambient config (the app's service principal when
-        # deployed, DATABRICKS_CONFIG_PROFILE locally).
+        # profile=None uses the ambient config (DATABRICKS_CONFIG_PROFILE locally,
+        # the service principal inside an App or job).
         self.w = WorkspaceClient(profile=profile) if profile else WorkspaceClient()
 
     def embed(self, text: str) -> list[float]:
@@ -81,8 +79,8 @@ class RagAgent:
         topic: str | None = None,
         vector: list[float] | None = None,
     ) -> list[dict]:
-        # Callers that already embedded the question (the app) pass `vector`
-        # so the embedding endpoint isn't called twice.
+        # Callers that already embedded the question pass `vector` so the
+        # embedding endpoint isn't called twice.
         kwargs = dict(
             index_name=INDEX,
             columns=RETRIEVE_COLS,
@@ -108,8 +106,8 @@ class RagAgent:
         max_tokens: int = 400,
         hits: list[dict] | None = None,
     ) -> dict:
-        # Callers that already retrieved the passages (the app, which shows the
-        # search step) pass `hits` so the index isn't queried twice.
+        # Callers that already retrieved the passages (for example to show them
+        # before the answer) pass `hits` so the index isn't queried twice.
         if hits is None:
             hits = self.retrieve(question, k=k, topic=topic)
         if not hits:
